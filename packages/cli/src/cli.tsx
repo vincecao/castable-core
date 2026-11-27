@@ -105,6 +105,10 @@ if (command === "players") {
   const { execFileSync } = await import("node:child_process");
   execFileSync(bin, ["--players"], { stdio: "inherit" });
 } else if (["", "setup", "start"].includes(command)) {
+  if (!process.stdin.isTTY) {
+    console.error("castable needs a terminal for its keyboard screens: run it directly, not piped.");
+    process.exit(1);
+  }
   const bin = sys.findReceiver();
   const configured = bin !== null && sys.readSettings(sys.settingsPath(bin)).name !== undefined;
   const mode: Mode = command === "setup" || (command === "" && !configured) ? "setup" : "start";
