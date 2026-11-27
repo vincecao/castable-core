@@ -24,7 +24,8 @@ const USAGE: &str = "castable-receiver [--name NAME] [--player NAME|'COMMAND {ur
 
 /// The chosen player: one from the registry, or none (log only).
 enum Backend {
-    External(External),
+    // Boxed: a player is much larger than a handle (clippy::large_enum_variant on Windows).
+    External(Box<External>),
     Log(Handle),
 }
 
@@ -149,7 +150,7 @@ fn pick(choice: Option<&str>, registry: &Registry, handle: Handle) -> Result<(Ba
         None => return Err(format!("no player named {choice}; see --players")),
     };
     let control = if spec.control == Control::Launch { "launch only" } else { "full" };
-    Ok((Backend::External(External::new(name, spec, handle)?), control))
+    Ok((Backend::External(Box::new(External::new(name, spec, handle)?)), control))
 }
 
 #[tokio::main]

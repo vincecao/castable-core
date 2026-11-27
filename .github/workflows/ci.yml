@@ -42,7 +42,11 @@ jobs:
         run: |
           cd "$RUNNER_TEMP"
           script -qec "stty cols 100 rows 30; timeout 8 node $GITHUB_WORKSPACE/packages/cli/bin/castable.mjs setup" /dev/null > wizard.out || true
-          grep -q "phones call" wizard.out || { cat wizard.out; exit 1; }
+          # Any wizard screen counts (here it starts by building the receiver);
+          # a crash such as "React is not defined" doesn't.
+          if grep -q "Error" wizard.out || ! grep -qE "phones call|Building the receiver" wizard.out; then
+            cat wizard.out; exit 1
+          fi
 
   model:
     # The planned design must keep every rule; the naive design must still break.
