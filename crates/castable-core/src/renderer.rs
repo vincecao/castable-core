@@ -6,7 +6,7 @@
 use crate::didl::descriptor_from;
 use crate::error::UpnpError;
 use crate::service::{sink_protocol_info, Service};
-use crate::session::{Input, Phase, Playback, PlayerCommand, PlayerEvent, SenderCommand, Session};
+use crate::session::{Input, Phase, Playback, PlayerCommand, PlayerEvent, ScreenCommand, SenderCommand, Session};
 use crate::soap::RawCall;
 use crate::time::{format_hms, parse_hms};
 use crate::xml::escape;
@@ -188,6 +188,12 @@ impl Renderer {
     }
 
     /// Feeds a player event (load finished, progress, ended...).
+    /// A press on the receiver's own screen. Dropped (no change, no error)
+    /// if the cast it was made on has been replaced.
+    pub fn on_screen(&mut self, press: ScreenCommand) -> Result<Reply, UpnpError> {
+        self.drive(Input::Screen(press))
+    }
+
     pub fn on_player(&mut self, event: PlayerEvent) -> Reply {
         self.drive(Input::Player(event)).unwrap_or_default()
     }

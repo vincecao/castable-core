@@ -90,7 +90,7 @@ enum Phase {
     Idle,
     Loading  { cast: Cast, then: AfterLoad },      // AfterLoad = Hold | Play
     Loaded   { cast: Cast, playback: Playback },   // Stopped | Playing | Paused
-    Unloaded { cast: Cast, why: Unloaded },        // StoppedWhileLoading | LoadFailed(reason)
+    Unloaded { cast: Cast, why: Unloaded },        // StoppedWhileLoading | LoadFailed(reason) | PlayerClosed
 }
 ```
 
@@ -102,7 +102,8 @@ stateDiagram-v2
   Loading --> Loaded: the player loaded it
   Loading --> Unloaded: stop · the load fails
   Loaded --> Loaded: play · pause · stop · seek · progress
-  Loaded --> Unloaded: the load fails mid-play
+  Loaded --> Unloaded: the load fails mid-play · the player closes
+  Loading --> Unloaded: the player closes
   Loaded --> Loaded: it ends [Stopped]
   Unloaded --> Loading: play [retry]
   Loading --> Loading: a new cast [new Gen]
@@ -115,7 +116,8 @@ Inputs come from two sides and produce **`PlayerCommand`s** for whoever plays th
 | Input | Type | Comes from |
 | --- | --- | --- |
 | Sender commands | `SenderCommand` (`SetUri`, `Play`, `Pause`, `Stop`, `Seek`) | A phone, via SOAP. Volume and mute skip the session: the renderer turns them straight into `SetVolume` / `SetMuted` |
-| Player events | `PlayerEvent` (`Loaded`, `LoadFailed`, `Progress`, `Ended`) — each tagged with a `Gen` | The player |
+| Screen presses | `ScreenCommand { gen, command }` | The receiver's own screen, remote or keyboard. `gen` is the cast the screen showed; a press on a replaced cast is dropped |
+| Player events | `PlayerEvent` (`Loaded`, `LoadFailed`, `Progress`, `Ended`, `Closed`) — each tagged with a `Gen` | The player. `Closed`: it went away (process exited, window closed), so nothing is loaded |
 | Output | `PlayerCommand` (`Load{gen,media}`, `Play`, `Pause`, `Stop`, `Seek`, `SetVolume`, `SetMuted`) | → the player |
 
 The transitions are pure functions, `Phase::on_sender(self, cmd) -> (Phase, Result<Vec<PlayerCommand>, UpnpError>)`
@@ -136,7 +138,11 @@ Checked first in TLA+ (`models/cast-session/`), then against the Rust code by an
 
 Also by design: a **seek while loading** is stored in `cast.position` and applied as `[Seek, Play]`
 once loaded; a **live stream** refuses Seek with `SeekModeNotSupported`; a **mid-play load failure**
-sends `Stop` so the player doesn't keep running.
+and the **end of a video** both send `Stop`, so whatever was in flight the player ends up still; a
+**closed player** moves to `Unloaded`, where Play loads the video again; a **screen press** carries
+the `gen` of the view it was made on (views carry `gen`), and a stale one is dropped.
+
+These last three were found by the end-to-end model (§11).
 
 ## 4. One cast, end to end
 
@@ -177,7 +183,8 @@ trait Player: Send {
 ```
 
 `castable_net::start(config)` returns a `Receiver` with a command stream and a `Handle` for
-reporting `PlayerEvent`s back. A desktop app, a phone app or a test fake all implement the same
+reporting `PlayerEvent`s back (`player_event`) and for presses on the receiver's own screen
+(`screen_command`). A desktop app, a phone app or a test fake all implement the same
 seam. The dispatch is generic (`run<P: Player>`), not `dyn`.
 
 ## 5. Players
@@ -197,7 +204,7 @@ control = "mpv-ipc"   # mpv-ipc | vlc-http | launch
 | --- | --- | --- |
 | `mpv-ipc` | Full control and real events | JSON IPC over a Unix socket, or a named pipe on Windows |
 | `vlc-http` | Full control and real events | VLC's web interface, polled every 500 ms |
-| `launch` | Start and stop | Spawn the program; `Loaded` is assumed |
+| `launch` | Start and stop | Spawn the program; `Loaded` is assumed; Stop closes it and reports `Closed` |
 
 Placeholders: `{url} {title} {referer} {user_agent} {headers} {ipc} {port} {password}`. An argument
 whose placeholder has no value is left out; a group such as `["-window_title", "{title}"]` is dropped whole. Specs are validated on load
@@ -240,7 +247,8 @@ for example `RUST_LOG=castable_net=debug`.
 | `ready` | `name`, `player`, `control`, `url` |
 | `control` / `control refused` | `action` (+ `code`, `error` when refused) |
 | `player command` | `command`, plus `gen`, `url`, `title`, `live` on load, `to_s` on seek, `volume` |
-| `player event` | `event`, `gen` (+ `reason` on a failed load) |
+| `player event` | `event` (`loaded`, `load_failed`, `ended`, `closed`), `gen` (+ `reason` on a failed load) |
+| `screen press` / `screen press refused` | `command`, `gen` (+ `code`, `error` when refused) |
 | `transport` | `from`, `to`, `gen` |
 | `subscribed` / `unsubscribed` | `service`, `sid`, `renew`, `timeout_s` |
 | HTTP request (debug) | `peer`, `method`, `path`, `status`, `elapsed_us` |
@@ -275,23 +283,32 @@ UPDATE_FIXTURES=1 cargo test --test fixtures && pnpm typecheck
 | --- | --- |
 | `cargo test` | Unit tests, the session model test, loopback end-to-end (`castable-net/tests/e2e.rs`), fixtures |
 | TLC on `fixed.cfg` / `naive.cfg` | `fixed` must pass, `naive` must fail (proves the model can catch the bugs) |
-| TLC on `models/system/*.cfg` | The whole plan end to end (phone, core, screen, player, queues): `fixed-*` must pass, `naive-*` must fail |
+| TLC on `models/system/*.cfg` | The whole system end to end (phone, core, screen, player, queues): `current-*` must pass, `before-fixes-*` must fail |
 | `pnpm typecheck && pnpm test` | Wire types against fixtures, CLI reducers |
 | `scripts/fake-sender.sh` | Acts as a phone against a running receiver |
 | CI | All of the above on Linux, macOS and Windows |
 
-## 11. Known issues from the end-to-end model
+## 11. The end-to-end model
 
-[`models/system/`](../models/system/README.md) checks the plan as a whole. It found three bugs in
-the code as written, each with a proposed fix that the model shows holds every rule:
+[`models/system/`](../models/system/README.md) checks the whole system, not just the session: a
+phone and the receiver's screen send commands, the core and the player talk over queues, and the
+screen updates late, so any message can be in flight. Two rules:
 
-| # | Bug | Proposed fix |
+| Rule | Meaning |
+| --- | --- |
+| `PlaysWhatCoreSays` | Once every message has arrived, the video plays exactly when the core (and so every phone and the screen) says it plays, and it is the current cast |
+| `PressActsOnItsCast` | A press on the receiver's screen acts on the cast you saw when you pressed it |
+
+It found three bugs in the first design, all fixed, each with a regression test:
+
+| # | Bug | Fix |
 | --- | --- | --- |
-| 1 | A press on the receiver's screen can act on the next video, if a phone casts in between | Screen presses carry the `gen` they were made on; the core drops stale ones |
-| 2 | With mpv/VLC, Play after the video ends or the window closes does nothing, while the phone shows Playing | `ended` says whether the player is gone; if so the core moves to Unloaded, where Play reloads |
-| 3 | With the web player, a Play that crosses the end leaves it playing while everything says Stopped | On `ended`, the core also sends `Stop` |
+| 1 | A screen press could act on the next video if a phone cast in between | `ScreenCommand { gen, command }`; stale presses are dropped |
+| 2 | With an external player, Play after the video ended or the window closed went nowhere | `PlayerEvent::Closed` → `Unloaded`, where Play reloads |
+| 3 | With the web player, a Play crossing the end left it playing while everything said Stopped | `Ended` also sends `Stop` |
 
-When a fix lands, update `models/system` (`Fixed` becomes the plan as written) and remove its row.
+The current design holds both rules (`current-*.cfg`); the design before the fixes is kept
+(`before-fixes-*.cfg`) and must still fail, so CI proves the model can catch them.
 
 ## 12. Roadmap and open decisions
 
@@ -308,7 +325,7 @@ updates the matching section here:
 
 - a crate, package or layer boundary (§2)
 - a variant of `Phase`, `PlayerCommand`, `PlayerEvent` or `SenderCommand`, or a session rule (§3);
-  re-run `models/system` and update §11
+  re-run `models/system` (§11)
 - the `Player` seam or the cast flow (§4)
 - the `players.toml` schema or a control protocol (§5)
 - config locations, CLI screens or log messages (§6, §7)

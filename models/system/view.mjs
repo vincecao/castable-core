@@ -42,7 +42,7 @@ export const step = (action, from, to) => {
     case "CoreEvent": {
       const e = from.evQ[1];
       const late = e.g !== from.gen ? " (old video, ignored)" : "";
-      return { loaded: "the core hears: loaded", failed: "the core hears: load failed", ended: "the core hears: ended" }[e.e] + late;
+      return { loaded: "the core hears: loaded", failed: "the core hears: load failed", ended: "the core hears: ended", closed: "the core hears: player closed" }[e.e] + late;
     }
     case "PlayerTakes":
       return `the player gets: ${commandWords[from.cmdQ[1].c]}`;

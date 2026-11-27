@@ -57,6 +57,25 @@
     {
       "gen": 1,
       "type": "ended"
+    },
+    {
+      "gen": 1,
+      "type": "closed"
+    }
+  ],
+  "screen": [
+    {
+      "command": {
+        "type": "pause"
+      },
+      "gen": 1
+    },
+    {
+      "command": {
+        "toSecs": 40.0,
+        "type": "seek"
+      },
+      "gen": 2
     }
   ],
   "sender": [

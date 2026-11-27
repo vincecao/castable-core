@@ -6,7 +6,7 @@
 //   core ──ReceiverView──▶ UI          (what to show)
 //   core ──PlayerCommand──▶ player     (what to play)
 //   player ──PlayerEvent──▶ core       (what happened)
-//   UI ──SenderCommand──▶ core         (remote/keyboard: play, pause, seek)
+//   UI ──ScreenCommand──▶ core         (remote/keyboard: play, pause, seek, on cast `gen`)
 
 export type MediaKind = "video" | "audio" | "image";
 
@@ -48,15 +48,16 @@ export type TransportState =
  */
 export type ReceiverView = { transportState: TransportState } & (
   | { phase: "idle" }
-  | { phase: "loading"; media: MediaDescriptor; playWhenReady: boolean }
+  | { phase: "loading"; gen: Gen; media: MediaDescriptor; playWhenReady: boolean }
   | {
       phase: "loaded";
+      gen: Gen;
       media: MediaDescriptor;
       playback: "stopped" | "playing" | "paused";
       positionSecs: number;
       durationSecs?: number;
     }
-  | { phase: "unloaded"; media: MediaDescriptor; error?: string }
+  | { phase: "unloaded"; gen: Gen; media: MediaDescriptor; error?: string }
 );
 
 /** Identifies one load; events from an older load are ignored by the core. */
@@ -77,12 +78,24 @@ export type PlayerEvent =
   | { type: "loaded"; gen: Gen; durationSecs?: number }
   | { type: "loadFailed"; gen: Gen; reason: string }
   | { type: "progress"; gen: Gen; positionSecs: number; durationSecs?: number }
-  | { type: "ended"; gen: Gen };
+  | { type: "ended"; gen: Gen }
+  /** The player went away (its process exited, its window was closed): nothing is loaded. */
+  | { type: "closed"; gen: Gen };
 
-/** Commands from a sender, or from the receiver's own remote and keyboard. Mirrors `SenderCommand`. */
+/** Commands from a sender (a phone), or inside a `ScreenCommand`. Mirrors `SenderCommand`. */
 export type SenderCommand =
   | ({ type: "setUri" } & MediaDescriptor)
   | { type: "play" }
   | { type: "pause" }
   | { type: "stop" }
   | { type: "seek"; toSecs: number };
+
+/**
+ * A press on the receiver's own screen (a button, a TV remote, a key), made
+ * while it showed cast `gen`. The core drops it if that cast has been
+ * replaced. Mirrors `ScreenCommand`.
+ */
+export interface ScreenCommand {
+  gen: Gen;
+  command: SenderCommand;
+}

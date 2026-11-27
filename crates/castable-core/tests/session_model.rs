@@ -56,6 +56,9 @@ impl FakePlayer {
                 self.playing = false;
             }
             PlayerEvent::Ended { gen } if self.shown == Some(*gen) && self.playing => self.playing = false,
+            PlayerEvent::Closed { gen } if self.shown == Some(*gen) || self.loading == Some(*gen) => {
+                *self = FakePlayer { issued: std::mem::take(&mut self.issued), ..FakePlayer::default() };
+            }
             _ => {} // late or duplicate event: the player itself does nothing
         }
     }
@@ -80,6 +83,12 @@ impl World {
         if let Input::Player(ev) = &input {
             self.player.emit(ev);
         }
+        // A screen press counts as the user's intent only if it reaches its cast.
+        let intent = match &input {
+            Input::Screen(p) if Some(p.gen) == self.current_gen() => Some(Input::Sender(p.command.clone())),
+            Input::Screen(_) => None,
+            other => Some(other.clone()),
+        };
         let before = self.session.phase().clone();
         match self.session.handle(input.clone()) {
             Ok(out) => {
@@ -92,7 +101,9 @@ impl World {
                 return Err(e);
             }
         }
-        self.track_intent(&input);
+        if let Some(intent) = intent {
+            self.track_intent(&intent);
+        }
         Ok(())
     }
 
@@ -106,7 +117,7 @@ impl World {
             Input::Sender(SenderCommand::Pause | SenderCommand::Stop) => self.asked = false,
             // The video ended or failed: the old Play request is used up,
             // unless the session is still honouring it.
-            Input::Player(PlayerEvent::Ended { .. } | PlayerEvent::LoadFailed { .. })
+            Input::Player(PlayerEvent::Ended { .. } | PlayerEvent::LoadFailed { .. } | PlayerEvent::Closed { .. })
                 if !matches!(self.session.phase(), Phase::Loading { then: AfterLoad::Play, .. })
                     && self.session.transport_state() != TransportState::Playing =>
             {
@@ -154,6 +165,11 @@ impl World {
             v.push(Input::Player(PlayerEvent::Loaded { gen, duration: Some(Duration::from_secs(60)) }));
             v.push(Input::Player(PlayerEvent::LoadFailed { gen, reason: "404".into() }));
             v.push(Input::Player(PlayerEvent::Ended { gen }));
+            v.push(Input::Player(PlayerEvent::Closed { gen }));
+            // Presses on the receiver's screen, made while it showed `gen`
+            // (stale ones are made on a cast that has since been replaced).
+            v.push(Input::Screen(ScreenCommand { gen, command: SenderCommand::Play }));
+            v.push(Input::Screen(ScreenCommand { gen, command: SenderCommand::Pause }));
         }
         v
     }
@@ -262,6 +278,49 @@ fn a_seek_while_loading_a_live_stream_is_refused() {
         w.send(sender(SenderCommand::Seek { to: Duration::from_secs(5) })),
         Err(UpnpError::SeekModeNotSupported)
     );
+}
+
+// ---- The three bugs found by the end-to-end model (models/system) ----
+
+#[test]
+fn a_screen_press_on_a_replaced_cast_is_dropped() {
+    // The screen still shows video 1; a phone casts video 2; your seek on
+    // video 1 must not move video 2.
+    let mut w = replay(vec![cast("http://a/1.mp4"), loaded(1), cast("http://a/2.mp4")]);
+    let before = w.session.phase().clone();
+    let stale = ScreenCommand { gen: Gen(1), command: SenderCommand::Seek { to: Duration::from_secs(40) } };
+    let out = w.session.handle(Input::Screen(stale)).unwrap();
+    assert_eq!(out, Outcome::default());
+    assert_eq!(w.session.phase(), &before);
+    // The same press on the cast shown goes through.
+    w.send(loaded(2)).unwrap();
+    let fresh = ScreenCommand { gen: Gen(2), command: SenderCommand::Seek { to: Duration::from_secs(40) } };
+    assert_eq!(
+        w.session.handle(Input::Screen(fresh)).unwrap().commands,
+        vec![PlayerCommand::Seek { to: Duration::from_secs(40) }]
+    );
+}
+
+#[test]
+fn play_after_the_player_closed_loads_again() {
+    // mpv quits at the end of a video, or you close its window; a later Play
+    // must open the video again, not go to a player that is gone.
+    let mut w = replay(vec![cast("http://a/1.mp4"), sender(SenderCommand::Play), loaded(1)]);
+    w.send(Input::Player(PlayerEvent::Closed { gen: Gen(1) })).unwrap();
+    assert_eq!(w.session.transport_state(), TransportState::Stopped);
+    let out = w.session.handle(sender(SenderCommand::Play)).unwrap();
+    assert!(matches!(out.commands.as_slice(), [PlayerCommand::Load { gen: Gen(2), .. }]), "{out:?}");
+}
+
+#[test]
+fn the_end_of_a_video_also_stops_the_player() {
+    // A Play sent just before the end can reach the player after it (and a
+    // browser restarts an ended video on play()): the core sends Stop on Ended.
+    let mut w = replay(vec![cast("http://a/1.mp4"), sender(SenderCommand::Play), loaded(1)]);
+    let out = w.session.handle(Input::Player(PlayerEvent::Ended { gen: Gen(1) })).unwrap();
+    assert_eq!(out.commands, vec![PlayerCommand::Stop]);
+    assert_eq!(w.session.transport_state(), TransportState::Stopped);
+    w.player.playing = false;
 }
 
 // ---- Exhaustive check, like TLC but over the real code ----

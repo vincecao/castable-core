@@ -35,3 +35,8 @@ test("without a title, the file name stands in", async () => {
   assert.equal(titleOf("", "http://x/"), "http://x/");
   assert.equal(titleOf("Episode 1", "http://x/a.mp4"), "Episode 1");
 });
+
+test("a closed player says how to get it back", () => {
+  const s = fold(initialStatus, `{"level":"INFO","message":"player event","event":"closed","gen":1}`);
+  assert.equal(s.recent.at(-1), "player closed: Play opens it again");
+});

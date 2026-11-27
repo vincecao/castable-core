@@ -2,7 +2,9 @@
 //! it through [`Msg`], so there are no locks and every change is ordered.
 
 use crate::gena::{Delivery, SubscribeRequest, Subscriptions};
-use castable_core::{Action, PlayerCommand, PlayerEvent, Renderer, Reply, Service, TransportState, UpnpError};
+use castable_core::{
+    Action, PlayerCommand, PlayerEvent, Renderer, Reply, ScreenCommand, Service, TransportState, UpnpError,
+};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -16,6 +18,7 @@ pub type Out = Vec<(&'static str, String)>;
 pub enum Msg {
     Act { action: Action, reply: oneshot::Sender<Result<Out, UpnpError>> },
     Player(PlayerEvent),
+    Screen(ScreenCommand),
     Subscribe { service: Service, req: SubscribeRequest, reply: oneshot::Sender<Option<(String, Duration)>> },
     Unsubscribe { sid: String, reply: oneshot::Sender<bool> },
 }
@@ -75,6 +78,16 @@ impl Actor {
                 }
                 let reply = self.renderer.on_player(event);
                 self.apply(reply);
+            }
+            Msg::Screen(press) => {
+                let (command, gen) = (press.command.kind(), press.gen.0);
+                tracing::info!(command, gen, "screen press");
+                match self.renderer.on_screen(press) {
+                    Ok(reply) => {
+                        self.apply(reply);
+                    }
+                    Err(e) => tracing::info!(command, code = e.code(), error = %e, "screen press refused"),
+                }
             }
             Msg::Subscribe { service, req, reply } => {
                 let renew = matches!(req, SubscribeRequest::Renew { .. });

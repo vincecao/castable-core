@@ -128,6 +128,7 @@ packages/protocol/        WIRE    @castable/protocol: TypeScript mirrors of the 
 packages/cli/             CLI     @castable/cli: the setup wizard and live status (Ink)
 fixtures/                         JSON written by the Rust tests, type-checked by TypeScript
 models/cast-session/              TLA+ model of the cast session
+models/system/                    TLA+ model of the whole system end to end (statechart charts in its README)
 scripts/                          setup.sh, setup.ps1, fake-sender.sh
 ```
 

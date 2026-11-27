@@ -4,7 +4,7 @@
 use crate::process::{report_spawn_error, OnExit, Proc};
 use crate::spec::{Control, PlayerSpec, Vars};
 use crate::{mpv, vlc};
-use castable_net::{player::assume_loaded, Gen, Handle, MediaDescriptor, Player, PlayerCommand};
+use castable_net::{player::assume_loaded, Gen, Handle, MediaDescriptor, Player, PlayerCommand, PlayerEvent};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -15,6 +15,8 @@ pub struct External {
     program: PathBuf,
     handle: Handle,
     proc: Option<Proc>,
+    /// The cast loaded, if any.
+    gen: Option<Gen>,
     /// Commands for the running player's control protocol (never `Load`).
     ctl: Option<UnboundedSender<PlayerCommand>>,
     warned: bool,
@@ -27,7 +29,7 @@ impl External {
         }
         let program =
             spec.resolve_program().ok_or_else(|| format!("player {name}: none of {:?} is installed", spec.program))?;
-        Ok(Self { name: name.into(), spec, program, handle, proc: None, ctl: None, warned: false })
+        Ok(Self { name: name.into(), spec, program, handle, proc: None, gen: None, ctl: None, warned: false })
     }
 
     pub fn control(&self) -> Control {
@@ -68,13 +70,14 @@ impl External {
         let on_exit = match self.spec.control {
             // `open -a ...` and similar return at once while the app plays on.
             Control::Launch => OnExit::Launcher { grace: Duration::from_secs(3) },
-            _ => OnExit::EndedOrFailed,
+            _ => OnExit::ClosedOrFailed,
         };
         let proc = match Proc::spawn(cmd, gen, self.handle.clone(), on_exit) {
             Ok(p) => p,
             Err(e) => return report_spawn_error(&self.handle, gen, &self.name, e),
         };
         self.proc = Some(proc);
+        self.gen = Some(gen);
         let handle = self.handle.clone();
         match self.spec.control {
             Control::MpvIpc => {
@@ -120,8 +123,14 @@ impl Player for External {
                 self.close().await;
                 self.load(gen, &media);
             }
-            // A launch-only player has nothing to pause: Stop closes it.
-            PlayerCommand::Stop if self.spec.control == Control::Launch => self.close().await,
+            // A launch-only player has nothing to pause: Stop closes it, and
+            // says so, so that a later Play opens it again.
+            PlayerCommand::Stop if self.spec.control == Control::Launch => {
+                self.close().await;
+                if let Some(gen) = self.gen.take() {
+                    self.handle.player_event(PlayerEvent::Closed { gen });
+                }
+            }
             other => self.send(other),
         }
     }

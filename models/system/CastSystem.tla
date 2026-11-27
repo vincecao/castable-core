@@ -9,8 +9,10 @@
 \*   Kind = "process"  an external player (mpv, VLC): its process exits when
 \*                     the video ends or you close its window
 \*   Kind = "web"      @castable/player-web: the <video> stays loaded
-\*   Fixed = FALSE     the plan as written
-\*   Fixed = TRUE      with the three fixes this model proposes
+\*   Fixed = TRUE      the code as it is (current-*.cfg)
+\*   Fixed = FALSE     the design before the three fixes this model found
+\*                     (before-fixes-*.cfg); kept so CI shows the model still
+\*                     catches those bugs
 EXTENDS Naturals, Sequences
 
 CONSTANTS Kind, Fixed, MaxGen, MaxQ
@@ -84,9 +86,9 @@ PhonePlays == PhoneSends("play")
 PhonePauses == PhoneSends("pause")
 PhoneStops == PhoneSends("stop")
 
-\* A press on the receiver's own screen, as a SenderCommand (packages/ui).
-\* Plan as written: it carries no generation. Fix: it names the cast shown,
-\* and the core drops it if that cast has been replaced.
+\* A press on the receiver's own screen (packages/ui). Fix 1: it is a
+\* ScreenCommand naming the cast shown, and the core drops it if that cast
+\* has been replaced. Before: a plain SenderCommand.
 CorePress ==
   /\ uiQ # <<>>
   /\ LET k == Head(uiQ)[1]
@@ -114,14 +116,12 @@ CoreEvent ==
                [] e.e = "failed" /\ phase \in Loaded ->
                     phase' = "unloaded" /\ cmdQ' = Append(cmdQ, Cmd("stop", gen))
                [] e.e = "ended" /\ phase = "playing" ->
-                    \* Fix: a player that is gone reports it, and the core
-                    \* treats the media as unloaded, so Play loads it again.
-                    \* Fix: otherwise the core sends Stop, so a Play that crossed
+                    \* Fix 3: the core also sends Stop, so a Play that crossed
                     \* the end on its way can't leave the video running.
-                    IF Fixed /\ e.gone THEN phase' = "unloaded" /\ cmdQ' = cmdQ
-                    ELSE IF Fixed THEN phase' = "stopped" /\ cmdQ' = Append(cmdQ, Cmd("stop", gen))
-                    ELSE phase' = "stopped" /\ cmdQ' = cmdQ
-               [] e.e = "ended" /\ Fixed /\ e.gone /\ phase \in Loaded ->
+                    phase' = "stopped" /\ cmdQ' = IF Fixed THEN Append(cmdQ, Cmd("stop", gen)) ELSE cmdQ
+               [] e.e = "closed" /\ phase \in Loaded \cup {"loading"} ->
+                    \* Fix 2: the player is gone, so nothing is loaded; Play
+                    \* loads it again.
                     phase' = "unloaded" /\ cmdQ' = cmdQ
                [] OTHER -> UNCHANGED <<phase, cmdQ>>)
              /\ UNCHANGED <<then, gen, lastGen>>
@@ -141,26 +141,31 @@ PlayerTakes ==
   /\ cmdQ' = Tail(cmdQ)
   /\ UNCHANGED <<phase, then, gen, lastGen, evQ, screen, uiQ, misapplied>>
 
-Report(e, gone) == evQ' = Append(evQ, [e |-> e, g |-> pGen, gone |-> gone])
+Report(e) == evQ' = Append(evQ, [e |-> e, g |-> pGen])
 
 LoadDone ==
-  /\ pState = "loading" /\ pState' = "paused" /\ Report("loaded", FALSE)
+  /\ pState = "loading" /\ pState' = "paused" /\ Report("loaded")
   /\ UNCHANGED <<phase, then, gen, lastGen, cmdQ, pGen, screen, uiQ, misapplied>>
 
 LoadFails ==
-  /\ pState = "loading" /\ pState' = "none" /\ Report("failed", FALSE)
+  /\ pState = "loading" /\ pState' = "none" /\ Report("failed")
   /\ UNCHANGED <<phase, then, gen, lastGen, cmdQ, pGen, screen, uiQ, misapplied>>
 
+\* An external player reports the end, then its process exits (mpv runs with
+\* --keep-open=no). Before fix 2 a clean exit was reported as ended too.
 VideoEnds ==
   /\ pState = "playing"
   /\ pState' = IF Kind = "process" THEN "gone" ELSE "paused"
-  /\ Report("ended", Kind = "process")
+  /\ evQ' = IF Kind = "process" /\ Fixed
+            THEN evQ \o <<[e |-> "ended", g |-> pGen], [e |-> "closed", g |-> pGen]>>
+            ELSE Append(evQ, [e |-> "ended", g |-> pGen])
   /\ UNCHANGED <<phase, then, gen, lastGen, cmdQ, pGen, screen, uiQ, misapplied>>
 
-\* You close the external player's window: a clean exit, reported as ended.
+\* You close the external player's window: a clean exit, reported as closed
+\* (before fix 2: as ended).
 WindowClosed ==
   /\ Kind = "process" /\ pState \in {"paused", "playing"}
-  /\ pState' = "gone" /\ Report("ended", TRUE)
+  /\ pState' = "gone" /\ Report(IF Fixed THEN "closed" ELSE "ended")
   /\ UNCHANGED <<phase, then, gen, lastGen, cmdQ, pGen, screen, uiQ, misapplied>>
 
 \* ---- The screen (packages/ui) ----

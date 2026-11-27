@@ -11,8 +11,8 @@ message can still be in flight when the next thing happens.
 | --- | --- |
 | `Kind = "process"` | An external player (mpv, IINA, VLC): its process exits when the video ends or you close its window |
 | `Kind = "web"` | `@castable/player-web`: the `<video>` stays loaded after it ends |
-| `Fixed = FALSE` | The plan as the code is written today |
-| `Fixed = TRUE` | With the three fixes below |
+| `Fixed = TRUE` | The code as it is (`current-*.cfg`) |
+| `Fixed = FALSE` | The design before the three fixes below (`before-fixes-*.cfg`); kept so CI shows the model still catches those bugs |
 | `MaxGen = 2`, `MaxQ = 2` | Up to two casts; up to two messages queued each way |
 
 ## Rules
@@ -26,26 +26,30 @@ message can still be in flight when the next thing happens.
 
 | Config | States | `PlaysWhatCoreSays` | `PressActsOnItsCast` |
 | --- | --- | --- | --- |
-| `naive-process.cfg` | 15,835 | **breaks** (bug 2) | **breaks** (bug 1) |
-| `naive-web.cfg` | 27,633 | **breaks** (bug 3) | **breaks** (bug 1) |
-| `fixed-process.cfg` | 8,451 | holds | holds |
-| `fixed-web.cfg` | 10,587 | holds | holds |
+| `current-process.cfg` | 10,555 | holds | holds |
+| `current-web.cfg` | 10,587 | holds | holds |
+| `before-fixes-process.cfg` | 15,835 | breaks (bug 2) | breaks (bug 1) |
+| `before-fixes-web.cfg` | 27,633 | breaks (bug 3) | breaks (bug 1) |
 
-No config deadlocks. The fixed models are past the 500-state chart budget, so
-only the bug paths are drawn.
+No config deadlocks. The current models are past the 500-state chart budget,
+so only the bug paths of the earlier design are drawn.
 
-## The three bugs
+## The three bugs it found, all fixed
 
-Each was confirmed against the real code, not only the model.
+Each was confirmed in the real code before the fix, and each has a regression
+test in `crates/castable-core/tests/session_model.rs`. Bug 2 was also replayed
+against the real receiver with a fake mpv that quits at the end: before, the
+second Play went nowhere; now it opens the player again.
 
-**1. A press on the screen can act on the next video.** A screen press is a
+**1. A press on the screen could act on the next video.** A screen press is a
 `SenderCommand` with no cast ID (`Intent` in `@castable/ui`). If a phone casts a
 new video between what you saw and your press reaching the core, the press
 applies to the new video. With seek, the new video jumps to a time picked on the
 old one.
-*Fix:* screen presses carry the `gen` of the view they were made on; the core
-drops a press whose `gen` is no longer current. Phone commands are unchanged
-(UPnP has no such ID).
+*Fixed:* every view carries the `gen` of its cast, and a screen press is a
+`ScreenCommand { gen, command }`; the core drops a press whose `gen` is no
+longer current. Phone commands are unchanged (UPnP has no such ID).
+Test: `a_screen_press_on_a_replaced_cast_is_dropped`.
 
 0. Core: Waiting · player empty
 1. the phone casts a video: Core: Loading (video 1) · player empty
@@ -56,14 +60,15 @@ drops a press whose `gen` is no longer current. Phone commands are unchanged
 6. you press play on the screen: Core: Loading (video 2) · player loading, old video
 7. your press reaches the core, after the cast changed: Core: Loading (video 2) · player loading, old video
 
-**2. With mpv or VLC, Play after the video ends (or after you close the player
-window) does nothing, while the phone shows Playing.** mpv runs with
+**2. With mpv or VLC, Play after the video ended (or after you closed the
+player window) did nothing, while the phone showed Playing.** mpv runs with
 `--keep-open=no`, so its process exits at the end; a clean exit is reported as
 `ended`; the core keeps the media as loaded (Stopped), so the next Play is sent
 to a process that is gone and `External::send` drops it.
-*Fix:* `ended` says whether the player is gone; when it is, the core moves to
-"Stopped, not loaded", where Play loads the video again (as it already does
-after a failed load).
+*Fixed:* a new `PlayerEvent::Closed`. An external player reports it when its
+process exits (and a launch-only player when Stop closes it); the core moves
+to "Stopped, not loaded", where Play loads the video again.
+Test: `play_after_the_player_closed_loads_again`.
 
 0. Core: Waiting · player empty
 1. the phone casts a video: Core: Loading (video 1) · player empty
@@ -75,12 +80,13 @@ after a failed load).
 7. the phone presses play: Core: Playing (video 1) · player closed
 8. the player gets: play: Core: Playing (video 1) · player closed
 
-**3. With the web player, a Play that crosses the end of the video leaves it
-playing while everything says Stopped.** The video ends while a play is still
+**3. With the web player, a Play that crossed the end of the video left it
+playing while everything said Stopped.** The video ends while a play is still
 queued; the browser's `play()` restarts an ended video; then the late `ended`
 event moves the core to Stopped.
-*Fix:* on `ended`, the core also sends `Stop` (rewind and pause), as it already
-does for a failure mid-play. Whatever was in flight, the player ends up still.
+*Fixed:* on `ended`, the core also sends `Stop` (rewind and pause), as it
+already does for a failure mid-play. Whatever was in flight, the player ends
+up still. Test: `the_end_of_a_video_also_stops_the_player`.
 
 0. Core: Waiting · player empty
 1. the phone casts a video: Core: Loading (video 1) · player empty
@@ -98,7 +104,7 @@ does for a failure mid-play. Whatever was in flight, the player ends up still.
 
 ## Charts
 
-The bug paths for the plan as written, with an external player:
+The bug paths in the design before the fixes, with an external player:
 
 ```mermaid
 ---
@@ -259,13 +265,13 @@ stateDiagram-v2
 Plain TLC (as CI does):
 
 ```sh
-java -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC -config fixed-process.cfg -workers 1 CastSystem.tla
+java -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC -config current-process.cfg -workers 1 CastSystem.tla
 ```
 
 With the statechart skill, to draw a chart and get each bug path again:
 
 ```sh
-statechart CastSystem.tla --config naive-web.cfg --view view.mjs --out out-naive-web
+statechart CastSystem.tla --config before-fixes-web.cfg --view view.mjs --out out-before-fixes-web
 ```
 
 The skill needs TLC 1.7.4.
@@ -274,5 +280,6 @@ The skill needs TLC 1.7.4.
 
 Seek positions and durations (a seek is one abstract step), volume and mute,
 GENA delivery to phones (they read the same derived state as the screen), more
-than two casts, a player that fails mid-play, and timing: every interleaving of
+than two casts, a player that fails mid-play, launch-only players (QuickTime,
+the browser; covered by the same `closed` event), and timing: every interleaving of
 queued messages is checked, not how likely each one is.

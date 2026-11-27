@@ -4,6 +4,7 @@
     "transportState": "NO_MEDIA_PRESENT"
   },
   {
+    "gen": 1,
     "media": {
       "delivery": {
         "type": "onDemand"
@@ -18,6 +19,7 @@
     "transportState": "TRANSITIONING"
   },
   {
+    "gen": 1,
     "media": {
       "delivery": {
         "type": "onDemand"
@@ -33,6 +35,7 @@
   },
   {
     "durationSecs": 1500.0,
+    "gen": 1,
     "media": {
       "delivery": {
         "type": "onDemand"
@@ -49,6 +52,7 @@
   },
   {
     "durationSecs": 1500.0,
+    "gen": 1,
     "media": {
       "delivery": {
         "type": "onDemand"
@@ -65,6 +69,7 @@
   },
   {
     "durationSecs": 1500.0,
+    "gen": 1,
     "media": {
       "delivery": {
         "type": "onDemand"
@@ -81,6 +86,7 @@
   },
   {
     "durationSecs": 1500.0,
+    "gen": 1,
     "media": {
       "delivery": {
         "type": "onDemand"
@@ -97,6 +103,7 @@
   },
   {
     "error": "network error",
+    "gen": 1,
     "media": {
       "delivery": {
         "type": "onDemand"
@@ -110,6 +117,7 @@
     "transportState": "STOPPED"
   },
   {
+    "gen": 2,
     "media": {
       "delivery": {
         "type": "live"
@@ -123,6 +131,7 @@
     "transportState": "TRANSITIONING"
   },
   {
+    "gen": 2,
     "media": {
       "delivery": {
         "type": "live"
@@ -136,6 +145,7 @@
     "transportState": "TRANSITIONING"
   },
   {
+    "gen": 2,
     "media": {
       "delivery": {
         "type": "live"

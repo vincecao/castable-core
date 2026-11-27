@@ -54,6 +54,8 @@ pub enum Playback {
 pub enum Unloaded {
     StoppedWhileLoading,
     LoadFailed(String),
+    /// The player went away (its process exited, its window was closed).
+    PlayerClosed,
 }
 
 /// The whole session state. Each variant carries exactly the data that is
@@ -82,6 +84,10 @@ pub enum Phase {
 #[serde(rename_all = "camelCase")]
 pub struct View<'a> {
     pub transport_state: &'static str,
+    /// The cast this view shows. The screen sends it back with each press,
+    /// so a press made on a replaced cast is dropped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gen: Option<Gen>,
     #[serde(flatten)]
     pub phase: PhaseView<'a>,
 }
@@ -130,8 +136,8 @@ impl TransportState {
     }
 }
 
-/// Commands from a sender: parsed from SOAP, or sent by the receiver's own
-/// UI (a TV remote, the keyboard) as JSON.
+/// Commands from a sender: parsed from SOAP, or pressed on the receiver's
+/// own screen (a TV remote, the keyboard; see [`ScreenCommand`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SenderCommand {
@@ -179,6 +185,11 @@ pub enum PlayerEvent {
     Ended {
         gen: Gen,
     },
+    /// The player went away: its process exited or its window was closed.
+    /// Nothing is loaded any more, so a Play has to load the media again.
+    Closed {
+        gen: Gen,
+    },
 }
 
 impl PlayerEvent {
@@ -189,6 +200,7 @@ impl PlayerEvent {
             PlayerEvent::LoadFailed { .. } => "load_failed",
             PlayerEvent::Progress { .. } => "progress",
             PlayerEvent::Ended { .. } => "ended",
+            PlayerEvent::Closed { .. } => "closed",
         }
     }
 
@@ -197,14 +209,39 @@ impl PlayerEvent {
             PlayerEvent::Loaded { gen, .. }
             | PlayerEvent::LoadFailed { gen, .. }
             | PlayerEvent::Progress { gen, .. }
-            | PlayerEvent::Ended { gen } => *gen,
+            | PlayerEvent::Ended { gen }
+            | PlayerEvent::Closed { gen } => *gen,
         }
     }
 }
 
+impl SenderCommand {
+    /// Short name for logs.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            SenderCommand::SetUri(_) => "set_uri",
+            SenderCommand::Play => "play",
+            SenderCommand::Pause => "pause",
+            SenderCommand::Stop => "stop",
+            SenderCommand::Seek { .. } => "seek",
+        }
+    }
+}
+
+/// A press on the receiver's own screen, made while it showed cast `gen`.
+/// JSON: `{"gen":1,"command":{"type":"pause"}}`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScreenCommand {
+    pub gen: Gen,
+    pub command: SenderCommand,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Input {
+    /// From a phone. UPnP names no cast, so it acts on the current one.
     Sender(SenderCommand),
+    /// From the receiver's screen; dropped if its cast has been replaced.
+    Screen(ScreenCommand),
     Player(PlayerEvent),
 }
 
@@ -295,11 +332,11 @@ impl Session {
                 media: &cast.media,
                 error: match why {
                     Unloaded::LoadFailed(reason) => Some(reason),
-                    Unloaded::StoppedWhileLoading => None,
+                    Unloaded::StoppedWhileLoading | Unloaded::PlayerClosed => None,
                 },
             },
         };
-        View { transport_state: self.transport_state().as_str(), phase }
+        View { transport_state: self.transport_state().as_str(), gen: self.cast().map(|c| c.gen), phase }
     }
 
     /// UPnP `TransportStatus`: `ERROR_OCCURRED` after a failed load.
@@ -315,6 +352,10 @@ impl Session {
         let phase = std::mem::replace(&mut self.phase, Phase::Idle);
         let (phase, result) = match input {
             Input::Sender(cmd) => phase.on_sender(cmd, &mut self.last_gen),
+            // A press made on a cast that has since been replaced is dropped:
+            // it was meant for a video that is no longer there.
+            Input::Screen(press) if phase.cast().map(|c| c.gen) != Some(press.gen) => (phase, Ok(vec![])),
+            Input::Screen(press) => phase.on_sender(press.command, &mut self.last_gen),
             Input::Player(ev) => {
                 let (phase, commands) = phase.on_player(ev);
                 (phase, Ok(commands))
@@ -436,9 +477,15 @@ impl Phase {
                 cast.duration = duration.or(cast.duration);
                 (Phase::Loaded { cast, playback }, vec![])
             }
+            // Stop too: a Play sent just before the end can reach the player
+            // after it, and a browser restarts an ended video on play().
             (Phase::Loaded { mut cast, playback: Playback::Playing }, PlayerEvent::Ended { .. }) => {
                 cast.position = Duration::ZERO;
-                (Phase::Loaded { cast, playback: Playback::Stopped }, vec![])
+                (Phase::Loaded { cast, playback: Playback::Stopped }, vec![PlayerCommand::Stop])
+            }
+            // The player is gone: nothing is loaded, so Play loads it again.
+            (Phase::Loading { cast, .. } | Phase::Loaded { cast, .. }, PlayerEvent::Closed { .. }) => {
+                (Phase::Unloaded { cast, why: Unloaded::PlayerClosed }, vec![])
             }
             // Anything else (a duplicate event, a late progress tick) changes nothing.
             (phase, _) => (phase, vec![]),

@@ -7,6 +7,7 @@ export const views = [
     "transportState": "NO_MEDIA_PRESENT"
   },
   {
+    "gen": 1,
     "media": {
       "delivery": {
         "type": "onDemand"
@@ -21,6 +22,7 @@ export const views = [
     "transportState": "TRANSITIONING"
   },
   {
+    "gen": 1,
     "media": {
       "delivery": {
         "type": "onDemand"
@@ -36,6 +38,7 @@ export const views = [
   },
   {
     "durationSecs": 1500.0,
+    "gen": 1,
     "media": {
       "delivery": {
         "type": "onDemand"
@@ -52,6 +55,7 @@ export const views = [
   },
   {
     "durationSecs": 1500.0,
+    "gen": 1,
     "media": {
       "delivery": {
         "type": "onDemand"
@@ -68,6 +72,7 @@ export const views = [
   },
   {
     "durationSecs": 1500.0,
+    "gen": 1,
     "media": {
       "delivery": {
         "type": "onDemand"
@@ -84,6 +89,7 @@ export const views = [
   },
   {
     "durationSecs": 1500.0,
+    "gen": 1,
     "media": {
       "delivery": {
         "type": "onDemand"
@@ -100,6 +106,7 @@ export const views = [
   },
   {
     "error": "network error",
+    "gen": 1,
     "media": {
       "delivery": {
         "type": "onDemand"
@@ -113,6 +120,7 @@ export const views = [
     "transportState": "STOPPED"
   },
   {
+    "gen": 2,
     "media": {
       "delivery": {
         "type": "live"
@@ -126,6 +134,7 @@ export const views = [
     "transportState": "TRANSITIONING"
   },
   {
+    "gen": 2,
     "media": {
       "delivery": {
         "type": "live"
@@ -139,6 +148,7 @@ export const views = [
     "transportState": "TRANSITIONING"
   },
   {
+    "gen": 2,
     "media": {
       "delivery": {
         "type": "live"

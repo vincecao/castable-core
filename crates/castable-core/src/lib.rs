@@ -21,6 +21,6 @@ pub use error::UpnpError;
 pub use renderer::{Action, Renderer, Reply};
 pub use service::Service;
 pub use session::{
-    AfterLoad, Cast, Gen, Input, Outcome, Phase, PhaseView, Playback, PlayerCommand, PlayerEvent, SenderCommand,
-    Session, TransportState, Unloaded, View,
+    AfterLoad, Cast, Gen, Input, Outcome, Phase, PhaseView, Playback, PlayerCommand, PlayerEvent, ScreenCommand,
+    SenderCommand, Session, TransportState, Unloaded, View,
 };

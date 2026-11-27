@@ -65,6 +65,7 @@ export function fold(status: Status, raw: string): Status {
       return say(`refused ${str(line.action)} (${str(line.code)})`);
     case "player event":
       if (line.event === "load_failed") return say(`failed: ${str(line.reason)}`, { problem: str(line.reason) });
+      if (line.event === "closed") return say("player closed: Play opens it again");
       return status;
     default:
       if (level === "WARN" || level === "ERROR") return say(str(line.message), { problem: str(line.message) });

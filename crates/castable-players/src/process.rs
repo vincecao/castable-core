@@ -8,10 +8,11 @@ use tokio::sync::oneshot;
 /// How a backend reads its process's exit.
 #[derive(Debug, Clone, Copy)]
 pub enum OnExit {
-    /// A clean exit means the media ended; any other exit means it failed.
-    EndedOrFailed,
+    /// A clean exit means the player closed (the video ended or you closed
+    /// its window); any other exit means it failed.
+    ClosedOrFailed,
     /// A launcher (`open -a ...`) exits at once while the app keeps playing:
-    /// an exit within `grace` says nothing; a later one means it ended.
+    /// an exit within `grace` says nothing; a later one means it closed.
     Launcher { grace: Duration },
 }
 
@@ -32,7 +33,7 @@ impl Proc {
                 status = child.wait() => {
                     let event = match (on_exit, status) {
                         (OnExit::Launcher { grace }, Ok(s)) if s.success() && started.elapsed() < grace => None,
-                        (_, Ok(s)) if s.success() => Some(PlayerEvent::Ended { gen }),
+                        (_, Ok(s)) if s.success() => Some(PlayerEvent::Closed { gen }),
                         (_, Ok(s)) => Some(PlayerEvent::LoadFailed { gen, reason: format!("{program} exited with {s}") }),
                         (_, Err(e)) => Some(PlayerEvent::LoadFailed { gen, reason: e.to_string() }),
                     };

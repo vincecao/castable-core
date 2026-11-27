@@ -20,7 +20,7 @@ mod http;
 pub mod player;
 mod ssdp;
 
-pub use castable_core::{DeviceInfo, Gen, MediaDescriptor, PlayerCommand, PlayerEvent};
+pub use castable_core::{DeviceInfo, Gen, MediaDescriptor, PlayerCommand, PlayerEvent, ScreenCommand, SenderCommand};
 pub use player::{run, Control, Player};
 
 /// This machine's address on the network senders use (the route to the
@@ -80,6 +80,11 @@ pub struct Handle {
 impl Handle {
     pub fn player_event(&self, event: PlayerEvent) {
         let _ = self.actor.send(actor::Msg::Player(event));
+    }
+
+    /// A press on the receiver's own screen (a button, a TV remote, a key).
+    pub fn screen_command(&self, press: ScreenCommand) {
+        let _ = self.actor.send(actor::Msg::Screen(press));
     }
 
     /// Stops the servers and sends SSDP byebye. Waits briefly for the byebye.
