@@ -11,7 +11,7 @@ use std::time::Duration;
 fn views() -> String {
     let mut s = Session::new();
     let mut out = vec![serde_json::to_value(s.view()).unwrap()];
-    let mut media = MediaDescriptor::video("http://10.0.0.5/e1.mp4");
+    let mut media = MediaDescriptor::video("http://192.0.2.10/e1.mp4");
     media.title = Some("Episode 1".into());
     media.mime = Some("video/mp4".into());
     let mut step = |s: &mut Session, input: Input| {
@@ -41,7 +41,7 @@ fn views() -> String {
         }),
     );
     // A live stream, playing.
-    let mut live = MediaDescriptor::video("http://10.0.0.5/news.m3u8");
+    let mut live = MediaDescriptor::video("http://192.0.2.10/news.m3u8");
     live.title = Some("Evening news".into());
     live.delivery = Delivery::Live;
     step(&mut s, Input::Sender(SenderCommand::SetUri(live)));
@@ -85,7 +85,7 @@ fn views_match_the_fixture() {
 }
 
 fn protocol() -> String {
-    let media = MediaDescriptor::video("http://10.0.0.5/e1.mp4");
+    let media = MediaDescriptor::video("http://192.0.2.10/e1.mp4");
     let commands = vec![
         PlayerCommand::Load { gen: Gen(1), media: media.clone() },
         PlayerCommand::Play,
@@ -199,7 +199,7 @@ fn check(files: &[(PathBuf, String)]) {
 
 #[test]
 fn descriptor_round_trips_through_json() {
-    let json = r#"{"url":"http://x/live.m3u8","kind":"video","mime":"application/vnd.apple.mpegurl","headers":{"Referer":"http://x/"},"delivery":{"type":"live"}}"#;
+    let json = r#"{"url":"https://media.example.com/live.m3u8","kind":"video","mime":"application/vnd.apple.mpegurl","headers":{"Referer":"https://media.example.com/"},"delivery":{"type":"live"}}"#;
     let m: MediaDescriptor = serde_json::from_str(json).unwrap();
     assert!(m.is_live());
     assert_eq!(serde_json::to_string(&m).unwrap(), json);

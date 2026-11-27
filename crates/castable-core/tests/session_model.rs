@@ -158,7 +158,8 @@ impl World {
             Input::Sender(SenderCommand::Seek { to: Duration::from_secs(5) }),
         ];
         if self.casts < 2 {
-            let url = if self.casts == 0 { "http://a/1.mp4" } else { "http://a/2.mp4" };
+            let url =
+                if self.casts == 0 { "https://media.example.com/1.mp4" } else { "https://media.example.com/2.mp4" };
             v.push(Input::Sender(SenderCommand::SetUri(MediaDescriptor::video(url))));
         }
         for &gen in &self.player.issued {
@@ -206,7 +207,12 @@ fn replay(steps: Vec<Input>) -> World {
 #[test]
 fn bug_path_screen_matches_state() {
     // phone casts a video → it loads → you press Play → phone casts a new video
-    let w = replay(vec![cast("http://a/1.mp4"), loaded(1), sender(SenderCommand::Play), cast("http://a/2.mp4")]);
+    let w = replay(vec![
+        cast("https://media.example.com/1.mp4"),
+        loaded(1),
+        sender(SenderCommand::Play),
+        cast("https://media.example.com/2.mp4"),
+    ]);
     assert_eq!(w.session.transport_state(), TransportState::Transitioning);
     assert!(!w.player.playing, "the old video must stop when a new one is cast");
 }
@@ -214,7 +220,7 @@ fn bug_path_screen_matches_state() {
 #[test]
 fn bug_path_never_shows_old_cast() {
     // phone casts a video → phone casts a new video → the old video finishes loading
-    let w = replay(vec![cast("http://a/1.mp4"), cast("http://a/2.mp4"), loaded(1)]);
+    let w = replay(vec![cast("https://media.example.com/1.mp4"), cast("https://media.example.com/2.mp4"), loaded(1)]);
     assert_eq!(w.player.shown, None);
     assert_eq!(w.session.transport_state(), TransportState::Transitioning);
 }
@@ -222,7 +228,7 @@ fn bug_path_never_shows_old_cast() {
 #[test]
 fn bug_path_play_is_never_lost() {
     // phone casts a video → you press Play while it loads → it loads
-    let w = replay(vec![cast("http://a/1.mp4"), sender(SenderCommand::Play), loaded(1)]);
+    let w = replay(vec![cast("https://media.example.com/1.mp4"), sender(SenderCommand::Play), loaded(1)]);
     assert_eq!(w.session.transport_state(), TransportState::Playing);
     assert!(w.player.playing);
 }
@@ -231,7 +237,7 @@ fn bug_path_play_is_never_lost() {
 fn bug_path_never_stuck_loading() {
     // phone casts a video → the video fails to load
     let w = replay(vec![
-        cast("http://a/1.mp4"),
+        cast("https://media.example.com/1.mp4"),
         Input::Player(PlayerEvent::LoadFailed {
             gen: Gen(1),
             error: CastError::with_detail(ErrorCode::NotFound, "404"),
@@ -244,7 +250,7 @@ fn bug_path_never_stuck_loading() {
 #[test]
 fn play_after_a_failed_load_retries() {
     let mut w = replay(vec![
-        cast("http://a/1.mp4"),
+        cast("https://media.example.com/1.mp4"),
         Input::Player(PlayerEvent::LoadFailed {
             gen: Gen(1),
             error: CastError::with_detail(ErrorCode::NotFound, "timeout"),
@@ -260,7 +266,7 @@ fn play_after_a_failed_load_retries() {
 fn errors_match_upnp() {
     let mut w = World::new();
     assert_eq!(w.send(sender(SenderCommand::Play)), Err(UpnpError::TransitionNotAvailable));
-    w.send(cast("http://a/1.mp4")).unwrap();
+    w.send(cast("https://media.example.com/1.mp4")).unwrap();
     w.send(loaded(1)).unwrap();
     assert_eq!(w.send(sender(SenderCommand::Seek { to: Duration::from_secs(600) })), Err(UpnpError::IllegalSeekTarget));
 }
@@ -268,7 +274,10 @@ fn errors_match_upnp() {
 #[test]
 fn a_seek_while_loading_starts_there() {
     // A phone casts, seeks to 0:30 and presses Play before the video has loaded.
-    let mut w = replay(vec![cast("http://a/1.mp4"), sender(SenderCommand::Seek { to: Duration::from_secs(30) })]);
+    let mut w = replay(vec![
+        cast("https://media.example.com/1.mp4"),
+        sender(SenderCommand::Seek { to: Duration::from_secs(30) }),
+    ]);
     w.send(sender(SenderCommand::Play)).unwrap();
     let before = w.player.clone();
     w.send(loaded(1)).unwrap();
@@ -279,7 +288,7 @@ fn a_seek_while_loading_starts_there() {
 
 #[test]
 fn a_seek_while_loading_a_live_stream_is_refused() {
-    let mut live = MediaDescriptor::video("http://a/live.m3u8");
+    let mut live = MediaDescriptor::video("https://media.example.com/live.m3u8");
     live.delivery = Delivery::Live;
     let mut w = World::new();
     w.send(Input::Sender(SenderCommand::SetUri(live))).unwrap();
@@ -295,7 +304,8 @@ fn a_seek_while_loading_a_live_stream_is_refused() {
 fn a_screen_press_on_a_replaced_cast_is_dropped() {
     // The screen still shows video 1; a phone casts video 2; your seek on
     // video 1 must not move video 2.
-    let mut w = replay(vec![cast("http://a/1.mp4"), loaded(1), cast("http://a/2.mp4")]);
+    let mut w =
+        replay(vec![cast("https://media.example.com/1.mp4"), loaded(1), cast("https://media.example.com/2.mp4")]);
     let before = w.session.phase().clone();
     let stale = ScreenCommand { gen: Gen(1), command: SenderCommand::Seek { to: Duration::from_secs(40) } };
     let out = w.session.handle(Input::Screen(stale)).unwrap();
@@ -314,7 +324,7 @@ fn a_screen_press_on_a_replaced_cast_is_dropped() {
 fn play_after_the_player_closed_loads_again() {
     // mpv quits at the end of a video, or you close its window; a later Play
     // must open the video again, not go to a player that is gone.
-    let mut w = replay(vec![cast("http://a/1.mp4"), sender(SenderCommand::Play), loaded(1)]);
+    let mut w = replay(vec![cast("https://media.example.com/1.mp4"), sender(SenderCommand::Play), loaded(1)]);
     w.send(Input::Player(PlayerEvent::Closed { gen: Gen(1) })).unwrap();
     assert_eq!(w.session.transport_state(), TransportState::Stopped);
     let out = w.session.handle(sender(SenderCommand::Play)).unwrap();
@@ -325,7 +335,7 @@ fn play_after_the_player_closed_loads_again() {
 fn the_end_of_a_video_also_stops_the_player() {
     // A Play sent just before the end can reach the player after it (and a
     // browser restarts an ended video on play()): the core sends Stop on Ended.
-    let mut w = replay(vec![cast("http://a/1.mp4"), sender(SenderCommand::Play), loaded(1)]);
+    let mut w = replay(vec![cast("https://media.example.com/1.mp4"), sender(SenderCommand::Play), loaded(1)]);
     let out = w.session.handle(Input::Player(PlayerEvent::Ended { gen: Gen(1) })).unwrap();
     assert_eq!(out.commands, vec![PlayerCommand::Stop]);
     assert_eq!(w.session.transport_state(), TransportState::Stopped);

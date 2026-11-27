@@ -10,7 +10,7 @@ export const protocol = {
           "type": "onDemand"
         },
         "kind": "video",
-        "url": "http://10.0.0.5/e1.mp4"
+        "url": "http://192.0.2.10/e1.mp4"
       },
       "type": "load"
     },
@@ -122,7 +122,7 @@ export const protocol = {
       },
       "kind": "video",
       "type": "setUri",
-      "url": "http://10.0.0.5/e1.mp4"
+      "url": "http://192.0.2.10/e1.mp4"
     },
     {
       "type": "play"

@@ -130,13 +130,13 @@ mod tests {
             ("[ffmpeg/demuxer] hls: HTTP error 404 Not Found", Some(ErrorCode::NotFound)),
             ("[ffmpeg] tcp: Connection timed out", Some(ErrorCode::Timeout)),
             (
-                "[ffmpeg] tcp: Failed to resolve hostname cdn.x: nodename nor servname provided",
+                "[ffmpeg] tcp: Failed to resolve hostname cdn.example.com: nodename nor servname provided",
                 Some(ErrorCode::Network),
             ),
             ("Failed to recognize file format.", Some(ErrorCode::Unsupported)),
             ("main: Your input can't be opened", Some(ErrorCode::Unsupported)),
             ("[ffmpeg/video] h264: Invalid data found when processing input", Some(ErrorCode::Decode)),
-            ("Playing: https://x/a.m3u8", None),
+            ("Playing: https://media.example.com/a.m3u8", None),
         ];
         for (line, code) in cases {
             assert_eq!(classify(line), code, "{line}");
@@ -147,9 +147,9 @@ mod tests {
     fn the_newest_known_line_wins() {
         let t = Tail::default();
         for l in [
-            "Playing: https://x/a.m3u8",
+            "Playing: https://media.example.com/a.m3u8",
             "[ffmpeg] https: HTTP error 403 Forbidden",
-            "Failed to open https://x/a.m3u8.",
+            "Failed to open https://media.example.com/a.m3u8.",
         ] {
             t.push(l.into());
         }
@@ -167,8 +167,8 @@ mod tests {
     #[test]
     fn status_lines_are_dropped() {
         assert_eq!(
-            meaningful("\x1b[31mFailed to open https://x/a.m3u8.\x1b[0m").as_deref(),
-            Some("Failed to open https://x/a.m3u8.")
+            meaningful("\x1b[31mFailed to open https://media.example.com/a.m3u8.\x1b[0m").as_deref(),
+            Some("Failed to open https://media.example.com/a.m3u8.")
         );
         assert_eq!(meaningful("(Paused) AV: 00:00:01 / 00:10:00 (0%)"), None);
         assert_eq!(meaningful("Exiting... (Errors when loading file)"), None);

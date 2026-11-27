@@ -61,14 +61,14 @@ mod tests {
   <s:Body>
     <u:SetAVTransportURI xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
       <InstanceID>0</InstanceID>
-      <CurrentURI>http://10.0.0.5:8080/v.mp4?a=1&amp;b=2</CurrentURI>
+      <CurrentURI>http://192.0.2.10:8080/v.mp4?a=1&amp;b=2</CurrentURI>
       <CurrentURIMetaData>&lt;DIDL-Lite&gt;&lt;/DIDL-Lite&gt;</CurrentURIMetaData>
     </u:SetAVTransportURI>
   </s:Body>
 </s:Envelope>"#;
         let call = parse_request(body).unwrap();
         assert_eq!(call.action, "SetAVTransportURI");
-        assert_eq!(call.arg("CurrentURI"), Some("http://10.0.0.5:8080/v.mp4?a=1&b=2"));
+        assert_eq!(call.arg("CurrentURI"), Some("http://192.0.2.10:8080/v.mp4?a=1&b=2"));
         assert_eq!(call.arg("CurrentURIMetaData"), Some("<DIDL-Lite></DIDL-Lite>"));
     }
 

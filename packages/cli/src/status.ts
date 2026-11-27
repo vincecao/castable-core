@@ -82,7 +82,7 @@ const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : n
 
 const MAX_RECENT = 8;
 
-/** "Bilibili/7.62.0 (Linux; Android 14)" → "Bilibili 7.62.0": the first product in a User-Agent. */
+/** "ExampleCast/1.0 (Linux; Android 14)" → "ExampleCast 1.0": the first product in a User-Agent. */
 export function appOf(userAgent: string): string {
   const first = userAgent.trim().split(/\s+/)[0] ?? "";
   return truncate(first.replace("/", " "), { length: 32 });

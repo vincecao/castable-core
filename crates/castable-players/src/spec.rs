@@ -252,10 +252,13 @@ mod tests {
     fn missing_values_drop_their_argument_or_group() {
         let spec = Registry::built_in().get("ffplay").unwrap().clone();
         let mut vars = Vars::new();
-        vars.insert("url", "http://x/a.mp4".into());
-        assert_eq!(spec.expand_args(&vars), ["-autoexit", "http://x/a.mp4"]);
+        vars.insert("url", "https://media.example.com/a.mp4".into());
+        assert_eq!(spec.expand_args(&vars), ["-autoexit", "https://media.example.com/a.mp4"]);
         vars.insert("title", "Episode 1".into());
-        assert_eq!(spec.expand_args(&vars), ["-autoexit", "-window_title", "Episode 1", "http://x/a.mp4"]);
+        assert_eq!(
+            spec.expand_args(&vars),
+            ["-autoexit", "-window_title", "Episode 1", "https://media.example.com/a.mp4"]
+        );
     }
 
     #[test]
@@ -288,8 +291,8 @@ mod tests {
         let spec = PlayerSpec::from_command_line(r#"open -a "QuickTime Player""#).unwrap();
         assert_eq!(spec.program, ["open"]);
         let mut vars = Vars::new();
-        vars.insert("url", "http://x/a.mp4".into());
-        assert_eq!(spec.expand_args(&vars), ["-a", "QuickTime Player", "http://x/a.mp4"]);
+        vars.insert("url", "https://media.example.com/a.mp4".into());
+        assert_eq!(spec.expand_args(&vars), ["-a", "QuickTime Player", "https://media.example.com/a.mp4"]);
         assert_eq!(split("ffplay  -autoexit {url}").unwrap(), ["ffplay", "-autoexit", "{url}"]);
         assert!(split(r#"open "unclosed"#).is_err());
     }

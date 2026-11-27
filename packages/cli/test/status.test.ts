@@ -5,9 +5,9 @@ import { appOf, clock, fold, initialStatus } from "../src/status.ts";
 // Lines as castable-receiver --log json writes them.
 const at = (t: string) => `"timestamp":"2026-11-27T${t}Z"`;
 const lines = [
-  `{${at("20:54:00")},"level":"INFO","message":"ready","name":"My Mac","player":"mpv","control":"full","url":"http://192.168.31.134:49152/desc.xml","log_file":"/u/.config/castable/logs/receiver.log"}`,
-  `{${at("20:54:01")},"level":"INFO","message":"cast from","peer":"192.168.31.20","user_agent":"Bilibili/7.62.0 (Linux; Android 14)"}`,
-  `{${at("20:54:01")},"level":"INFO","message":"player command","command":"load","gen":1,"url":"https://cdn.x/hls/a.m3u8","title":"头号玩家 原声版","host":"cdn.x","format":"hls","live":false}`,
+  `{${at("20:54:00")},"level":"INFO","message":"ready","name":"My Mac","player":"mpv","control":"full","url":"http://192.0.2.1:49152/desc.xml","log_file":"/u/.config/castable/logs/receiver.log"}`,
+  `{${at("20:54:01")},"level":"INFO","message":"cast from","peer":"192.0.2.20","user_agent":"ExampleCast/1.0 (Linux; Android 14)"}`,
+  `{${at("20:54:01")},"level":"INFO","message":"player command","command":"load","gen":1,"url":"https://cdn.example.com/hls/a.m3u8","title":"Sample Movie (Director’s Cut)","host":"cdn.example.com","format":"hls","live":false}`,
   `{${at("20:54:01")},"level":"INFO","message":"transport","from":"NO_MEDIA_PRESENT","to":"TRANSITIONING","gen":1}`,
   `not json at all`,
   `{${at("20:54:03")},"level":"INFO","message":"media info","event":"info","gen":1,"summary":"1080p · 1920×1080 · H.264 · 23.98 fps | AAC · 48 kHz · stereo","decoder":"videotoolbox"}`,
@@ -21,12 +21,12 @@ test("folds a real cast into the status screen", () => {
   assert.equal(s.ready?.name, "My Mac");
   assert.equal(s.state, "PLAYING");
   assert.deepEqual(s.now, {
-    title: "头号玩家 原声版",
-    url: "https://cdn.x/hls/a.m3u8",
-    host: "cdn.x",
+    title: "Sample Movie (Director’s Cut)",
+    url: "https://cdn.example.com/hls/a.m3u8",
+    host: "cdn.example.com",
     format: "hls",
     live: false,
-    from: { ip: "192.168.31.20", app: "Bilibili 7.62.0" },
+    from: { ip: "192.0.2.20", app: "ExampleCast 1.0" },
   });
   assert.equal(s.quality?.summary, "1080p · 1920×1080 · H.264 · 23.98 fps | AAC · 48 kHz · stereo");
   assert.equal(s.quality?.decoder, "videotoolbox");
@@ -34,7 +34,7 @@ test("folds a real cast into the status screen", () => {
   assert.deepEqual(
     s.recent.map((r) => r.text),
     [
-      "cast: 头号玩家 原声版",
+      "cast: Sample Movie (Director’s Cut)",
       "NO_MEDIA_PRESENT → TRANSITIONING",
       "quality: 1080p · 1920×1080 · H.264 · 23.98 fps | AAC · 48 kHz · stereo",
       "TRANSITIONING → PLAYING",
@@ -74,7 +74,7 @@ test("a closed player says how to get it back", () => {
 });
 
 test("helpers", () => {
-  assert.equal(appOf("Bilibili/7.62.0 (Linux; Android 14)"), "Bilibili 7.62.0");
+  assert.equal(appOf("ExampleCast/1.0 (Linux; Android 14)"), "ExampleCast 1.0");
   assert.equal(appOf(""), "");
   assert.equal(clock(724), "12:04");
   assert.equal(clock(3723), "1:02:03");

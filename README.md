@@ -137,16 +137,19 @@ attach it to an [issue](https://github.com/vincecao/castable-core/issues/new).
 `scripts/fake-sender.sh` sends what a phone's cast button sends (macOS, Linux, or WSL/Git Bash):
 
 ```sh
-cd ~/Movies && python3 -m http.server 8000 &          # serve a video from this computer
+scripts/make-sample.sh --hls                           # a fake test video (test pattern + tone); needs ffmpeg
+python3 -m http.server 8000 --directory samples &      # serve it from this computer
 IP=$(ipconfig getifaddr en0)                           # fish: set IP (ipconfig getifaddr en0)
 
-scripts/fake-sender.sh cast "http://$IP:8000/YOUR-VIDEO.mp4"
+scripts/fake-sender.sh cast "http://$IP:8000/sample.mp4"     # or .../hls/index.m3u8 for HLS
 scripts/fake-sender.sh play
 scripts/fake-sender.sh status        # CurrentTransportState: PLAYING
 scripts/fake-sender.sh seek 0:01:30
 ```
 
 `RECEIVER=http://host:port` points it at a receiver elsewhere (default `http://localhost:49152`).
+Tests and examples use only made-up sources: `media.example.com` and `192.0.2.x` addresses
+(reserved for examples), the generated sample above, and English titles.
 
 ## Structure
 

@@ -15,7 +15,7 @@ export const views = [
       "kind": "video",
       "mime": "video/mp4",
       "title": "Episode 1",
-      "url": "http://10.0.0.5/e1.mp4"
+      "url": "http://192.0.2.10/e1.mp4"
     },
     "phase": "loading",
     "playWhenReady": false,
@@ -31,7 +31,7 @@ export const views = [
       "kind": "video",
       "mime": "video/mp4",
       "title": "Episode 1",
-      "url": "http://10.0.0.5/e1.mp4"
+      "url": "http://192.0.2.10/e1.mp4"
     },
     "phase": "loading",
     "playWhenReady": true,
@@ -48,7 +48,7 @@ export const views = [
       "kind": "video",
       "mime": "video/mp4",
       "title": "Episode 1",
-      "url": "http://10.0.0.5/e1.mp4"
+      "url": "http://192.0.2.10/e1.mp4"
     },
     "phase": "loaded",
     "playback": "playing",
@@ -82,7 +82,7 @@ export const views = [
       "kind": "video",
       "mime": "video/mp4",
       "title": "Episode 1",
-      "url": "http://10.0.0.5/e1.mp4"
+      "url": "http://192.0.2.10/e1.mp4"
     },
     "phase": "loaded",
     "playback": "playing",
@@ -117,7 +117,7 @@ export const views = [
       "kind": "video",
       "mime": "video/mp4",
       "title": "Episode 1",
-      "url": "http://10.0.0.5/e1.mp4"
+      "url": "http://192.0.2.10/e1.mp4"
     },
     "phase": "loaded",
     "playback": "paused",
@@ -152,7 +152,7 @@ export const views = [
       "kind": "video",
       "mime": "video/mp4",
       "title": "Episode 1",
-      "url": "http://10.0.0.5/e1.mp4"
+      "url": "http://192.0.2.10/e1.mp4"
     },
     "phase": "loaded",
     "playback": "stopped",
@@ -176,7 +176,7 @@ export const views = [
       "kind": "video",
       "mime": "video/mp4",
       "title": "Episode 1",
-      "url": "http://10.0.0.5/e1.mp4"
+      "url": "http://192.0.2.10/e1.mp4"
     },
     "phase": "unloaded",
     "title": "Episode 1",
@@ -190,7 +190,7 @@ export const views = [
       },
       "kind": "video",
       "title": "Evening news",
-      "url": "http://10.0.0.5/news.m3u8"
+      "url": "http://192.0.2.10/news.m3u8"
     },
     "phase": "loading",
     "playWhenReady": false,
@@ -205,7 +205,7 @@ export const views = [
       },
       "kind": "video",
       "title": "Evening news",
-      "url": "http://10.0.0.5/news.m3u8"
+      "url": "http://192.0.2.10/news.m3u8"
     },
     "phase": "loading",
     "playWhenReady": true,
@@ -220,7 +220,7 @@ export const views = [
       },
       "kind": "video",
       "title": "Evening news",
-      "url": "http://10.0.0.5/news.m3u8"
+      "url": "http://192.0.2.10/news.m3u8"
     },
     "phase": "loaded",
     "playback": "playing",

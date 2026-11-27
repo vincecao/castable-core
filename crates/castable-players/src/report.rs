@@ -183,11 +183,11 @@ mod tests {
 
     #[test]
     fn redacts_tokens_but_keeps_what_helps() {
-        let line = r#"{"message":"player command","url":"https://cdn.example.com/hls/6b09e9cc87066.m3u8?sign=abc123&t=99","title":"头号玩家"}"#;
+        let line = r#"{"message":"player command","url":"https://cdn.example.com/hls/6b09e9cc87066.m3u8?sign=abc123&t=99","title":"Sample Movie"}"#;
         let r = redact(line);
         assert!(r.contains("https://cdn.example.com/hls/6b09e9cc87066.m3u8?…"), "{r}");
         assert!(!r.contains("abc123"));
-        assert!(r.contains("头号玩家"));
+        assert!(r.contains("Sample Movie"));
         let args = "--http-port=4242 --http-password=s3cret --meta-title=A";
         assert_eq!(redact(args), "--http-port=4242 --http-password=… --meta-title=A");
         assert_eq!(redact(r#"{"authorization":"Basic abc"}"#), r#"{"authorization":"…"}"#);

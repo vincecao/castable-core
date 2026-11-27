@@ -344,7 +344,7 @@ mod tests {
     #[test]
     fn a_full_cast() {
         let mut r = Renderer::new();
-        let set = call(Service::AvTransport, "<u:SetAVTransportURI><InstanceID>0</InstanceID><CurrentURI>http://x/a.mp4</CurrentURI><CurrentURIMetaData></CurrentURIMetaData></u:SetAVTransportURI>");
+        let set = call(Service::AvTransport, "<u:SetAVTransportURI><InstanceID>0</InstanceID><CurrentURI>https://media.example.com/a.mp4</CurrentURI><CurrentURIMetaData></CurrentURIMetaData></u:SetAVTransportURI>");
         let reply = r.act(set).unwrap();
         assert!(matches!(reply.commands[0], PlayerCommand::Load { gen: Gen(1), .. }));
         assert_eq!(reply.notify, vec![Service::AvTransport]);
@@ -389,7 +389,7 @@ mod tests {
     fn every_advertised_action_parses_to_itself() {
         use crate::service::{ActionSpec, ArgSpec, Dir};
         let value = |arg: &str| match arg {
-            "CurrentURI" => "http://x/a.mp4",
+            "CurrentURI" => "https://media.example.com/a.mp4",
             "Unit" => "REL_TIME",
             "Target" => "0:00:01",
             "DesiredMute" => "1",

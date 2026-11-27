@@ -1,7 +1,7 @@
 #!/bin/sh
 # Acts like a phone's cast button, so the receiver can be tested without one.
 #
-#   scripts/fake-sender.sh cast http://192.168.1.20:8000/video.mp4
+#   scripts/fake-sender.sh cast http://192.0.2.20:8000/video.mp4
 #   scripts/fake-sender.sh play | pause | stop | status
 #   scripts/fake-sender.sh seek 0:01:30
 #

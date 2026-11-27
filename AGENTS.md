@@ -8,3 +8,6 @@
   source per fact, model first.
 - Before committing: `cargo fmt && cargo clippy --all-targets -- -D warnings && cargo test` and
   `pnpm typecheck && pnpm test`.
+- Tests use made-up sources only: `media.example.com` / `cdn.example.com` hosts, `192.0.2.x`
+  addresses, made-up app names (`ExampleCast`), English titles. For a real file to play, use
+  `scripts/make-sample.sh` (a generated test pattern), never real content.

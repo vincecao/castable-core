@@ -123,7 +123,7 @@ impl MediaDescriptor {
     }
 
     /// What to call the media on screen: the sender's title, else the URL's
-    /// file name decoded (`%E5%90%8E%E4%BC%9A.mp4` → `后会`), else its host.
+    /// file name decoded (`Sample%20Movie.mp4` → `Sample Movie`), else its host.
     /// The UIs (`titleOf` in TypeScript) follow the same rule.
     pub fn display_title(&self) -> String {
         if let Some(t) = self.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
@@ -159,21 +159,21 @@ mod title_tests {
     #[test]
     fn a_title_falls_back_to_the_decoded_file_name() {
         let t = |url: &str| MediaDescriptor::video(url).display_title();
-        assert_eq!(t("http://x/movies/%E5%90%8E%E4%BC%9A%E5%8F%8B%E6%9C%9F.mp4?t=1"), "后会友期");
-        assert_eq!(t("http://x/a%20b/Episode%201.mkv"), "Episode 1");
-        assert_eq!(t("http://x/live/index.m3u8"), "index");
-        assert_eq!(t("http://10.0.0.5:8080/"), "10.0.0.5:8080");
-        assert_eq!(t("http://x/100%"), "100%");
-        let mut m = MediaDescriptor::video("http://x/a.mp4");
-        m.title = Some("  后会友期 ".into());
-        assert_eq!(m.display_title(), "后会友期");
+        assert_eq!(t("https://media.example.com/movies/Sample%20Movie%20%28Cut%29.mp4?t=1"), "Sample Movie (Cut)");
+        assert_eq!(t("https://media.example.com/a%20b/Episode%201.mkv"), "Episode 1");
+        assert_eq!(t("https://media.example.com/live/index.m3u8"), "index");
+        assert_eq!(t("http://192.0.2.10:8080/"), "192.0.2.10:8080");
+        assert_eq!(t("https://media.example.com/100%"), "100%");
+        let mut m = MediaDescriptor::video("https://media.example.com/a.mp4");
+        m.title = Some("  Sample Movie ".into());
+        assert_eq!(m.display_title(), "Sample Movie");
     }
 
     #[test]
     fn host_and_format_for_logs() {
         let m = MediaDescriptor::video("https://user:pw@cdn.example.com:8443/hls/6b09e9cc87066.m3u8?sign=x");
         assert_eq!((m.host().as_str(), m.format()), ("cdn.example.com:8443", Some("hls")));
-        let mut m = MediaDescriptor::video("http://x/play?id=1");
+        let mut m = MediaDescriptor::video("https://media.example.com/play?id=1");
         assert_eq!(m.format(), None);
         m.mime = Some("video/mp4".into());
         assert_eq!(m.format(), Some("mp4"));

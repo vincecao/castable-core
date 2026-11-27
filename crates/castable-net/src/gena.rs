@@ -167,7 +167,7 @@ mod tests {
 
     fn new_req() -> SubscribeRequest {
         SubscribeRequest::from_headers(
-            Some("<http://192.168.1.20:49999/evt/cb>"),
+            Some("<http://192.0.2.20:49999/evt/cb>"),
             Some("upnp:event"),
             None,
             Some("Second-300"),

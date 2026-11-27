@@ -79,8 +79,8 @@ mod tests {
 
     #[test]
     fn reads_title_mime_and_class() {
-        let didl = r#"<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"><item id="0" parentID="-1" restricted="1"><dc:title>Episode 1</dc:title><upnp:class>object.item.videoItem</upnp:class><res protocolInfo="http-get:*:video/mp4:DLNA.ORG_OP=01">http://x/e1.mp4</res></item></DIDL-Lite>"#;
-        let m = descriptor_from("http://x/e1.mp4", Some(didl));
+        let didl = r#"<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/"><item id="0" parentID="-1" restricted="1"><dc:title>Episode 1</dc:title><upnp:class>object.item.videoItem</upnp:class><res protocolInfo="http-get:*:video/mp4:DLNA.ORG_OP=01">https://media.example.com/e1.mp4</res></item></DIDL-Lite>"#;
+        let m = descriptor_from("https://media.example.com/e1.mp4", Some(didl));
         assert_eq!(m.title.as_deref(), Some("Episode 1"));
         assert_eq!(m.mime.as_deref(), Some("video/mp4"));
         assert_eq!(m.kind, MediaKind::Video);
@@ -88,15 +88,15 @@ mod tests {
 
     #[test]
     fn survives_missing_or_broken_metadata() {
-        let m = descriptor_from("http://x/live.m3u8?token=1", None);
+        let m = descriptor_from("https://media.example.com/live.m3u8?token=1", None);
         assert_eq!(m.mime.as_deref(), Some("application/vnd.apple.mpegurl"));
-        let m = descriptor_from("http://x/song.mp3", Some("<not xml"));
+        let m = descriptor_from("https://media.example.com/song.mp3", Some("<not xml"));
         assert_eq!(m.kind, MediaKind::Audio);
     }
 
     #[test]
     fn broadcast_class_is_live() {
         let didl = r#"<DIDL-Lite><item><dc:title>TV</dc:title><upnp:class>object.item.videoItem.videoBroadcast</upnp:class></item></DIDL-Lite>"#;
-        assert!(descriptor_from("http://x/ch1", Some(didl)).is_live());
+        assert!(descriptor_from("https://media.example.com/ch1", Some(didl)).is_live());
     }
 }

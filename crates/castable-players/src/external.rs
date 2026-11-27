@@ -178,14 +178,14 @@ mod tests {
 
     #[test]
     fn media_fills_its_placeholders() {
-        let mut m = MediaDescriptor::video("http://x/a.m3u8");
-        m.title = Some("后会友期".into());
-        m.headers.insert("Referer".into(), "http://x/".into());
+        let mut m = MediaDescriptor::video("https://media.example.com/a.m3u8");
+        m.title = Some("Sample Movie".into());
+        m.headers.insert("Referer".into(), "https://media.example.com/".into());
         let v = media_vars(&m);
-        assert_eq!(v["url"], "http://x/a.m3u8");
-        assert_eq!(v["title"], "后会友期");
-        assert_eq!(v["referer"], "http://x/");
-        assert_eq!(v["headers"], "Referer: http://x/");
+        assert_eq!(v["url"], "https://media.example.com/a.m3u8");
+        assert_eq!(v["title"], "Sample Movie");
+        assert_eq!(v["referer"], "https://media.example.com/");
+        assert_eq!(v["headers"], "Referer: https://media.example.com/");
         assert!(!v.contains_key("user_agent"));
     }
 }
