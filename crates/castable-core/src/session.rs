@@ -77,7 +77,7 @@ pub enum Phase {
     },
 }
 
-/// What the UI renders. Mirrors `ReceiverView` in `packages/descriptor`.
+/// What the UI renders. Mirrors `ReceiverView` in `packages/protocol`.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct View<'a> {
@@ -278,7 +278,7 @@ impl Session {
         }
     }
 
-    /// A serializable snapshot for the UI (`packages/descriptor` `ReceiverView`).
+    /// A serializable snapshot for the UI (`ReceiverView` in `packages/protocol`).
     pub fn view(&self) -> View<'_> {
         let phase = match &self.phase {
             Phase::Idle => PhaseView::Idle,

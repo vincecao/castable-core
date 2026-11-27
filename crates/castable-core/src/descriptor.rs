@@ -1,6 +1,6 @@
 //! The media descriptor: the one type every product shares.
 //! Sources produce it, the cast library sends it, the receiver plays it.
-//! Mirrored in TypeScript by `packages/descriptor`.
+//! Mirrored in TypeScript by `packages/protocol`.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

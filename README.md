@@ -117,6 +117,9 @@ scripts/fake-sender.sh seek 0:01:30
 
 ## Structure
 
+The full design (layers, the session state machine, the cast flow, players, logging) is in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), a living document kept current with the code.
+
 ```
 crates/castable-core/     LOGIC   session state machine, DLNA/UPnP parsing. Pure Rust, no I/O.
 crates/castable-net/      I/O     SSDP discovery, HTTP/SOAP control, GENA events; the Player seam
