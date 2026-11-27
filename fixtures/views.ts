@@ -19,6 +19,7 @@ export const views = [
     },
     "phase": "loading",
     "playWhenReady": false,
+    "title": "Episode 1",
     "transportState": "TRANSITIONING"
   },
   {
@@ -34,6 +35,7 @@ export const views = [
     },
     "phase": "loading",
     "playWhenReady": true,
+    "title": "Episode 1",
     "transportState": "TRANSITIONING"
   },
   {
@@ -51,6 +53,7 @@ export const views = [
     "phase": "loaded",
     "playback": "playing",
     "positionSecs": 0.0,
+    "title": "Episode 1",
     "transportState": "PLAYING"
   },
   {
@@ -84,6 +87,8 @@ export const views = [
     "phase": "loaded",
     "playback": "playing",
     "positionSecs": 724.0,
+    "qualityLabel": "1080p",
+    "title": "Episode 1",
     "transportState": "PLAYING"
   },
   {
@@ -117,6 +122,8 @@ export const views = [
     "phase": "loaded",
     "playback": "paused",
     "positionSecs": 724.0,
+    "qualityLabel": "1080p",
+    "title": "Episode 1",
     "transportState": "PAUSED_PLAYBACK"
   },
   {
@@ -150,6 +157,8 @@ export const views = [
     "phase": "loaded",
     "playback": "stopped",
     "positionSecs": 0.0,
+    "qualityLabel": "1080p",
+    "title": "Episode 1",
     "transportState": "STOPPED"
   },
   {
@@ -170,6 +179,7 @@ export const views = [
       "url": "http://10.0.0.5/e1.mp4"
     },
     "phase": "unloaded",
+    "title": "Episode 1",
     "transportState": "STOPPED"
   },
   {
@@ -184,6 +194,7 @@ export const views = [
     },
     "phase": "loading",
     "playWhenReady": false,
+    "title": "Evening news",
     "transportState": "TRANSITIONING"
   },
   {
@@ -198,6 +209,7 @@ export const views = [
     },
     "phase": "loading",
     "playWhenReady": true,
+    "title": "Evening news",
     "transportState": "TRANSITIONING"
   },
   {
@@ -213,6 +225,7 @@ export const views = [
     "phase": "loaded",
     "playback": "playing",
     "positionSecs": 0.0,
+    "title": "Evening news",
     "transportState": "PLAYING"
   }
 ] as const satisfies readonly ReceiverView[];

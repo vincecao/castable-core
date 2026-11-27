@@ -48,18 +48,21 @@ export type TransportState =
  */
 export type ReceiverView = { transportState: TransportState } & (
   | { phase: "idle" }
-  | { phase: "loading"; gen: Gen; media: MediaDescriptor; playWhenReady: boolean }
+  | { phase: "loading"; gen: Gen; title: string; media: MediaDescriptor; playWhenReady: boolean }
   | {
       phase: "loaded";
       gen: Gen;
+      title: string;
       media: MediaDescriptor;
       playback: "stopped" | "playing" | "paused";
       positionSecs: number;
       durationSecs?: number;
       /** What the player reported: resolution, codecs, bitrates. */
       info?: MediaInfo;
+      /** A short badge from `info`: "1080p", "4K · HDR10". */
+      qualityLabel?: string;
     }
-  | { phase: "unloaded"; gen: Gen; media: MediaDescriptor; error?: CastError }
+  | { phase: "unloaded"; gen: Gen; title: string; media: MediaDescriptor; error?: CastError }
 );
 
 /** Identifies one load; events from an older load are ignored by the core. */

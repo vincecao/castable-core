@@ -16,6 +16,7 @@
     },
     "phase": "loading",
     "playWhenReady": false,
+    "title": "Episode 1",
     "transportState": "TRANSITIONING"
   },
   {
@@ -31,6 +32,7 @@
     },
     "phase": "loading",
     "playWhenReady": true,
+    "title": "Episode 1",
     "transportState": "TRANSITIONING"
   },
   {
@@ -48,6 +50,7 @@
     "phase": "loaded",
     "playback": "playing",
     "positionSecs": 0.0,
+    "title": "Episode 1",
     "transportState": "PLAYING"
   },
   {
@@ -81,6 +84,8 @@
     "phase": "loaded",
     "playback": "playing",
     "positionSecs": 724.0,
+    "qualityLabel": "1080p",
+    "title": "Episode 1",
     "transportState": "PLAYING"
   },
   {
@@ -114,6 +119,8 @@
     "phase": "loaded",
     "playback": "paused",
     "positionSecs": 724.0,
+    "qualityLabel": "1080p",
+    "title": "Episode 1",
     "transportState": "PAUSED_PLAYBACK"
   },
   {
@@ -147,6 +154,8 @@
     "phase": "loaded",
     "playback": "stopped",
     "positionSecs": 0.0,
+    "qualityLabel": "1080p",
+    "title": "Episode 1",
     "transportState": "STOPPED"
   },
   {
@@ -167,6 +176,7 @@
       "url": "http://10.0.0.5/e1.mp4"
     },
     "phase": "unloaded",
+    "title": "Episode 1",
     "transportState": "STOPPED"
   },
   {
@@ -181,6 +191,7 @@
     },
     "phase": "loading",
     "playWhenReady": false,
+    "title": "Evening news",
     "transportState": "TRANSITIONING"
   },
   {
@@ -195,6 +206,7 @@
     },
     "phase": "loading",
     "playWhenReady": true,
+    "title": "Evening news",
     "transportState": "TRANSITIONING"
   },
   {
@@ -210,6 +222,7 @@
     "phase": "loaded",
     "playback": "playing",
     "positionSecs": 0.0,
+    "title": "Evening news",
     "transportState": "PLAYING"
   }
 ]

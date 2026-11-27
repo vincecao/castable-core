@@ -92,6 +92,10 @@ pub struct View<'a> {
     /// so a press made on a replaced cast is dropped.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gen: Option<Gen>,
+    /// What to call the cast on screen: the sender's title, else the decoded
+    /// file name (`MediaDescriptor::display_title`), so no UI decodes URLs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     #[serde(flatten)]
     pub phase: PhaseView<'a>,
 }
@@ -112,6 +116,9 @@ pub enum PhaseView<'a> {
         duration_secs: Option<f64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         info: Option<&'a MediaInfo>,
+        /// A short quality badge from `info`: "1080p · HDR10".
+        #[serde(skip_serializing_if = "Option::is_none")]
+        quality_label: Option<String>,
     },
     Unloaded {
         media: &'a MediaDescriptor,
@@ -342,6 +349,7 @@ impl Session {
                 position_secs: cast.position.as_secs_f64(),
                 duration_secs: cast.duration.map(|d| d.as_secs_f64()),
                 info: Some(&cast.info).filter(|i| !i.is_empty()),
+                quality_label: cast.info.short_label(),
             },
             Phase::Unloaded { cast, why } => PhaseView::Unloaded {
                 media: &cast.media,
@@ -351,7 +359,13 @@ impl Session {
                 },
             },
         };
-        View { transport_state: self.transport_state().as_str(), gen: self.cast().map(|c| c.gen), phase }
+        let cast = self.cast();
+        View {
+            transport_state: self.transport_state().as_str(),
+            gen: cast.map(|c| c.gen),
+            title: cast.map(|c| c.media.display_title()),
+            phase,
+        }
     }
 
     /// UPnP `TransportStatus`: `ERROR_OCCURRED` after a failed load.

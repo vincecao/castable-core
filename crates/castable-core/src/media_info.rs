@@ -127,6 +127,16 @@ impl MediaInfo {
         })
     }
 
+    /// A short badge: the resolution and, if any, the HDR format ("1080p",
+    /// "4K · HDR10"). `None` until the size is known.
+    pub fn short_label(&self) -> Option<String> {
+        let res = self.resolution_label()?;
+        Some(match self.video.as_ref().and_then(|v| v.hdr.as_deref()) {
+            Some(hdr) => format!("{res} · {hdr}"),
+            None => res.to_owned(),
+        })
+    }
+
     /// One line for people, industry style:
     /// "1080p · 1920×1080 · H.264 · 23.98 fps · 5.2 Mb/s | AAC · 48 kHz · stereo · 128 kb/s".
     pub fn summary(&self) -> String {
@@ -243,6 +253,10 @@ mod tests {
         assert_eq!(cinema.resolution_label(), Some("4K"));
         assert_eq!(rate(44_100), "44 kb/s");
         assert_eq!(MediaInfo::default().summary(), "");
+        assert_eq!(hls_1080().short_label().as_deref(), Some("1080p"));
+        let mut hdr = cinema.clone();
+        hdr.video.as_mut().unwrap().hdr = Some("HDR10".into());
+        assert_eq!(hdr.short_label().as_deref(), Some("4K · HDR10"));
     }
 
     #[test]
