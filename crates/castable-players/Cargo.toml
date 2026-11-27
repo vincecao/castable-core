@@ -17,6 +17,10 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 
 tracing-subscriber = { workspace = true, features = ["json"] }
+which = "7"
+shell-words = "1"
+strip-ansi-escapes = "0.2"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
 
 [[bin]]
 name = "castable-receiver"

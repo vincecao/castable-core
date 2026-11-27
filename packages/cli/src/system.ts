@@ -79,7 +79,9 @@ export const defaultName = () => `Castable (${hostname().replace(/\.local$/, "")
 
 /** Starts the receiver with its JSON log on stdout, one line per callback. */
 export function startReceiver(bin: string, config: string, onLine: (line: string) => void): ChildProcess {
-  const child = spawn(bin, ["--config", config, "--log", "json"], { stdio: ["ignore", "pipe", "pipe"] });
+  // Progress (position, duration) is logged at trace; the status screen wants it.
+  const env = { ...process.env, RUST_LOG: process.env.RUST_LOG ?? "info,castable_net::actor=trace" };
+  const child = spawn(bin, ["--config", config, "--log", "json"], { stdio: ["ignore", "pipe", "pipe"], env });
   createInterface({ input: child.stdout! }).on("line", onLine);
   createInterface({ input: child.stderr! }).on("line", (l) =>
     onLine(JSON.stringify({ level: "ERROR", message: l })),

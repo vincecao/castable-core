@@ -57,7 +57,7 @@ pub async fn handle(
     let resp = match route(&method, &path) {
         Route::Description => xml(StatusCode::OK, ctx.device.description_xml()),
         Route::Scpd(service) => xml(StatusCode::OK, service.scpd()),
-        Route::Control(service) => control(service, req, &ctx).await,
+        Route::Control(service) => control(service, req, &ctx, peer).await,
         Route::Subscribe(service) => subscribe(service, &req, &ctx).await,
         Route::Unsubscribe => unsubscribe(&req, &ctx).await,
         Route::NotFound => empty(StatusCode::NOT_FOUND),
@@ -73,7 +73,9 @@ pub async fn handle(
     Ok(with_server(resp, &ctx.device))
 }
 
-async fn control(service: Service, req: Request<Incoming>, ctx: &Ctx) -> Resp {
+async fn control(service: Service, req: Request<Incoming>, ctx: &Ctx, peer: std::net::SocketAddr) -> Resp {
+    // Which phone and app sent it: worth a line on every cast.
+    let agent = header(&req, "user-agent").unwrap_or("").to_owned();
     let body = match Limited::new(req.into_body(), MAX_BODY).collect().await {
         Ok(b) => String::from_utf8_lossy(&b.to_bytes()).into_owned(),
         Err(_) => return empty(StatusCode::PAYLOAD_TOO_LARGE),
@@ -81,12 +83,15 @@ async fn control(service: Service, req: Request<Incoming>, ctx: &Ctx) -> Resp {
     let result = async {
         let call = soap::parse_request(&body).inspect_err(|e| {
             let c = ErrorCode::from(e);
-            tracing::info!(service = service.id(), code = %c.id(), error = c.name(), category = c.category().name(), upnp = e.code(), bytes = body.len(), "control refused: the request isn't valid SOAP")
+            tracing::info!(service = service.id(), code = %c.id(), error = c.name(), category = c.category().name(), summary = c.summary(), upnp = e.code(), bytes = body.len(), "control refused: the request isn't valid SOAP")
         })?;
         let action = Action::parse(service, &call).inspect_err(|e| {
             let c = ErrorCode::from(e);
-            tracing::info!(service = service.id(), action = %call.action, code = %c.id(), error = c.name(), category = c.category().name(), upnp = e.code(), "control refused")
+            tracing::info!(service = service.id(), action = %call.action, code = %c.id(), error = c.name(), category = c.category().name(), summary = c.summary(), upnp = e.code(), "control refused")
         })?;
+        if matches!(action, Action::SetUri { .. }) {
+            tracing::info!(peer = %peer.ip(), user_agent = %agent, "cast from");
+        }
         let (reply, rx) = oneshot::channel();
         ctx.actor.send(Msg::Act { action, reply }).map_err(|_| UpnpError::ActionFailed)?;
         let out = rx.await.map_err(|_| UpnpError::ActionFailed)??;

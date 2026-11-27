@@ -1,7 +1,7 @@
 //! The "mpv-ipc" protocol: mpv's JSON IPC socket (mpv, IINA, other mpv front-ends).
 
 use crate::diagnose::{classify, Tail};
-use castable_net::{CastError, ErrorCode, Gen, Handle, PlayerCommand, PlayerEvent};
+use castable_net::{CastError, ErrorCode, Gen, Handle, MediaInfo, PlayerCommand, PlayerEvent};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -66,14 +66,22 @@ pub async fn session(
     };
     let (read, mut write) = tokio::io::split(stream);
     let mut lines = BufReader::new(read).lines();
-    for watch in
-        [r#"{"command":["observe_property",1,"duration"]}"#, r#"{"command":["observe_property",2,"time-pos"]}"#]
-    {
+    for (id, name) in [(1, "duration"), (2, "time-pos")].into_iter().chain(INFO_PROPERTIES.iter().copied()) {
+        let watch = format!(r#"{{"command":["observe_property",{id},"{name}"]}}"#);
         let _ = write.write_all(format!("{watch}\n").as_bytes()).await;
     }
+    let mut info = InfoTracker::default();
+    // mpv reports properties one by one, in bursts: report once they settle.
+    let mut info_due: Option<tokio::time::Instant> = None;
     let (mut loaded, mut duration, mut last_progress) = (false, None, Instant::now());
     loop {
         tokio::select! {
+            () = async { tokio::time::sleep_until(info_due.unwrap_or_else(tokio::time::Instant::now)).await }, if info_due.is_some() => {
+                info_due = None;
+                if let Some(report) = info.take_notable() {
+                    handle.player_event(PlayerEvent::Info { gen, info: Box::new(report) });
+                }
+            }
             ctl = controls.recv() => match ctl {
                 Some(ctl) => {
                     for msg in encode(&ctl) {
@@ -85,6 +93,10 @@ pub async fn session(
             line = lines.next_line() => {
                 let Ok(Some(line)) = line else { return };
                 let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
+                if info.observe(&msg) {
+                    info_due = Some(tokio::time::Instant::now() + INFO_SETTLE);
+                    continue;
+                }
                 match read_event(gen, &msg, &mut loaded, &mut duration, &mut last_progress) {
                     // mpv says only "loading failed"; its output usually says why.
                     Some(PlayerEvent::LoadFailed { gen, error }) => {
@@ -96,6 +108,105 @@ pub async fn session(
                 }
             }
         }
+    }
+}
+
+/// mpv properties that describe the media, observed with ids from 10.
+const INFO_PROPERTIES: &[(u32, &str)] = &[
+    (10, "video-params"),
+    (11, "video-format"),
+    (12, "container-fps"),
+    (13, "video-bitrate"),
+    (14, "audio-codec-name"),
+    (15, "audio-params"),
+    (16, "audio-bitrate"),
+    (17, "file-format"),
+    (18, "hwdec-current"),
+    (19, "hls-bitrate"),
+];
+
+/// How long mpv's property burst may last before the info is reported.
+const INFO_SETTLE: Duration = Duration::from_millis(400);
+
+/// Builds a [`MediaInfo`] from mpv's property changes and says when it's
+/// worth reporting (see `MediaInfo::differs_notably`).
+#[derive(Default)]
+struct InfoTracker {
+    now: MediaInfo,
+    reported: MediaInfo,
+}
+
+impl InfoTracker {
+    /// Takes in `msg` if it's a media property; true if it was one.
+    fn observe(&mut self, msg: &serde_json::Value) -> bool {
+        let name = match (msg["event"].as_str(), msg["name"].as_str()) {
+            (Some("property-change"), Some(n)) if INFO_PROPERTIES.iter().any(|(_, p)| *p == n) => n,
+            _ => return false,
+        };
+        let d = &msg["data"];
+        let text = || d.as_str().filter(|s| !s.is_empty()).map(str::to_owned);
+        let bps = || d.as_f64().filter(|b| *b > 0.0).map(|b| b as u64);
+        let video = self.now.video.get_or_insert_with(Default::default);
+        match name {
+            "video-params" => {
+                video.width = d["w"].as_u64().map(|w| w as u32);
+                video.height = d["h"].as_u64().map(|h| h as u32);
+                video.pixel_format = d["pixelformat"].as_str().map(str::to_owned);
+                video.hdr = match d["gamma"].as_str() {
+                    Some("pq") => Some("HDR10".into()),
+                    Some("hlg") => Some("HLG".into()),
+                    _ => None,
+                };
+            }
+            "video-format" => video.codec = text(),
+            "container-fps" => video.fps = d.as_f64().filter(|f| *f > 0.0),
+            "video-bitrate" => video.bitrate_bps = bps(),
+            "file-format" => self.now.container = text().map(|f| container(&f)),
+            "hwdec-current" => self.now.decoder = text().filter(|h| h != "no"),
+            "hls-bitrate" => self.now.bitrate_bps = bps(),
+            _ => {
+                let audio = self.now.audio.get_or_insert_with(Default::default);
+                match name {
+                    "audio-codec-name" => audio.codec = text(),
+                    "audio-params" => {
+                        audio.sample_rate_hz = d["samplerate"].as_u64().map(|r| r as u32);
+                        audio.channels = d["channel-count"].as_u64().map(|c| c as u16);
+                    }
+                    "audio-bitrate" => audio.bitrate_bps = bps(),
+                    _ => {}
+                }
+            }
+        }
+        if self.now.video.as_ref().is_some_and(|v| *v == Default::default()) {
+            self.now.video = None;
+        }
+        true
+    }
+
+    /// The info, if it changed notably since the last report.
+    fn take_notable(&mut self) -> Option<MediaInfo> {
+        if !self.now.differs_notably(&self.reported) {
+            return None;
+        }
+        self.reported = self.now.clone();
+        Some(self.now.clone())
+    }
+}
+
+/// mpv's demuxer list ("hls,applehttp", "mov,mp4,m4a,3gp,3g2,mj2") to one name.
+fn container(file_format: &str) -> String {
+    let names: Vec<&str> = file_format.split(',').collect();
+    let has = |n: &str| names.contains(&n);
+    if has("hls") || has("applehttp") {
+        "hls".into()
+    } else if has("dash") {
+        "dash".into()
+    } else if has("mp4") || has("mov") {
+        "mp4".into()
+    } else if has("matroska") || has("webm") {
+        "matroska".into()
+    } else {
+        names.first().copied().unwrap_or(file_format).to_owned()
     }
 }
 
@@ -139,6 +250,30 @@ fn read_event(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn media_info_comes_from_properties() {
+        let mut t = InfoTracker::default();
+        let p = |name: &str, data: serde_json::Value| json!({"event":"property-change","name":name,"data":data});
+        // A burst of properties is one report.
+        for (name, data) in [
+            ("video-params", json!({"w":1920,"h":1080,"pixelformat":"yuv420p","gamma":"bt.1886"})),
+            ("video-format", json!("h264")),
+            ("audio-params", json!({"samplerate":48000,"channel-count":2})),
+            ("audio-codec-name", json!("aac")),
+            ("file-format", json!("hls,applehttp")),
+            ("hls-bitrate", json!(5_200_000.0)),
+        ] {
+            assert!(t.observe(&p(name, data)));
+        }
+        let i = t.take_notable().unwrap();
+        assert_eq!((i.resolution_label(), i.container.as_deref()), (Some("1080p"), Some("hls")));
+        assert_eq!(t.take_notable(), None, "nothing new");
+        t.observe(&p("hls-bitrate", json!(5_300_000.0)));
+        assert_eq!(t.take_notable(), None, "a wobble isn't reported");
+        assert_eq!(t.now.summary(), "1080p · 1920×1080 · H.264 · 5.3 Mb/s | AAC · 48 kHz · stereo");
+        assert!(!t.observe(&p("time-pos", json!(3.0))));
+    }
 
     #[test]
     fn events_follow_mpv() {

@@ -16,6 +16,7 @@
 use crate::descriptor::MediaDescriptor;
 use crate::error::UpnpError;
 use crate::errors::CastError;
+use crate::media_info::MediaInfo;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -32,6 +33,8 @@ pub struct Cast {
     pub media: MediaDescriptor,
     pub position: Duration,
     pub duration: Option<Duration>,
+    /// What the player reported about the media (resolution, codecs, ...).
+    pub info: MediaInfo,
 }
 
 /// What to do once loading finishes.
@@ -107,6 +110,8 @@ pub enum PhaseView<'a> {
         position_secs: f64,
         #[serde(skip_serializing_if = "Option::is_none")]
         duration_secs: Option<f64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        info: Option<&'a MediaInfo>,
     },
     Unloaded {
         media: &'a MediaDescriptor,
@@ -186,6 +191,12 @@ pub enum PlayerEvent {
     Ended {
         gen: Gen,
     },
+    /// What the player found out about the media; may come more than once.
+    Info {
+        gen: Gen,
+        /// Boxed: much larger than the other events.
+        info: Box<MediaInfo>,
+    },
     /// The player went away: its process exited or its window was closed.
     /// Nothing is loaded any more, so a Play has to load the media again.
     Closed {
@@ -202,6 +213,7 @@ impl PlayerEvent {
             PlayerEvent::Progress { .. } => "progress",
             PlayerEvent::Ended { .. } => "ended",
             PlayerEvent::Closed { .. } => "closed",
+            PlayerEvent::Info { .. } => "info",
         }
     }
 
@@ -211,7 +223,8 @@ impl PlayerEvent {
             | PlayerEvent::LoadFailed { gen, .. }
             | PlayerEvent::Progress { gen, .. }
             | PlayerEvent::Ended { gen }
-            | PlayerEvent::Closed { gen } => *gen,
+            | PlayerEvent::Closed { gen }
+            | PlayerEvent::Info { gen, .. } => *gen,
         }
     }
 }
@@ -328,6 +341,7 @@ impl Session {
                 playback: *playback,
                 position_secs: cast.position.as_secs_f64(),
                 duration_secs: cast.duration.map(|d| d.as_secs_f64()),
+                info: Some(&cast.info).filter(|i| !i.is_empty()),
             },
             Phase::Unloaded { cast, why } => PhaseView::Unloaded {
                 media: &cast.media,
@@ -377,7 +391,8 @@ impl Phase {
     fn load(media: MediaDescriptor, then: AfterLoad, last_gen: &mut u64) -> (Phase, Vec<PlayerCommand>) {
         *last_gen += 1;
         let gen = Gen(*last_gen);
-        let cast = Cast { gen, media: media.clone(), position: Duration::ZERO, duration: None };
+        let cast =
+            Cast { gen, media: media.clone(), position: Duration::ZERO, duration: None, info: MediaInfo::default() };
         (Phase::Loading { cast, then }, vec![PlayerCommand::Load { gen, media }])
     }
 
@@ -483,6 +498,15 @@ impl Phase {
             (Phase::Loaded { mut cast, playback: Playback::Playing }, PlayerEvent::Ended { .. }) => {
                 cast.position = Duration::ZERO;
                 (Phase::Loaded { cast, playback: Playback::Stopped }, vec![PlayerCommand::Stop])
+            }
+            // Facts about the media: kept with the cast, no state change.
+            (Phase::Loading { mut cast, then }, PlayerEvent::Info { info, .. }) => {
+                cast.info.merge(&info);
+                (Phase::Loading { cast, then }, vec![])
+            }
+            (Phase::Loaded { mut cast, playback }, PlayerEvent::Info { info, .. }) => {
+                cast.info.merge(&info);
+                (Phase::Loaded { cast, playback }, vec![])
             }
             // The player is gone: nothing is loaded, so Play loads it again.
             (Phase::Loading { cast, .. } | Phase::Loaded { cast, .. }, PlayerEvent::Closed { .. }) => {

@@ -64,14 +64,22 @@ impl Actor {
                 let result = self.renderer.act(action).map(|r| self.apply(r));
                 if let Err(e) = &result {
                     let code = ErrorCode::from(e);
-                    tracing::info!(action = name, code = %code.id(), error = code.name(), category = code.category().name(), upnp = e.code(), "control refused");
+                    tracing::info!(action = name, code = %code.id(), error = code.name(), category = code.category().name(), summary = code.summary(), upnp = e.code(), "control refused");
                 }
                 let _ = reply.send(result);
             }
             Msg::Player(event) => {
                 let (kind, gen) = (event.kind(), event.gen().0);
-                if matches!(event, PlayerEvent::Progress { .. }) {
-                    tracing::trace!(event = kind, gen, "player event");
+                if let PlayerEvent::Progress { position, duration, .. } = &event {
+                    tracing::trace!(
+                        event = kind,
+                        gen,
+                        position_s = position.as_secs_f64(),
+                        duration_s = duration.map(|d| d.as_secs_f64()),
+                        "player event"
+                    );
+                } else if let PlayerEvent::Info { info, .. } = &event {
+                    log_info(gen, info);
                 } else if let PlayerEvent::LoadFailed { error, .. } = &event {
                     let c = error.code;
                     tracing::warn!(
@@ -99,7 +107,7 @@ impl Actor {
                     }
                     Err(e) => {
                         let code = ErrorCode::from(&e);
-                        tracing::info!(command, code = %code.id(), error = code.name(), category = code.category().name(), upnp = e.code(), "screen press refused")
+                        tracing::info!(command, code = %code.id(), error = code.name(), category = code.category().name(), summary = code.summary(), upnp = e.code(), "screen press refused")
                     }
                 }
             }
@@ -154,15 +162,46 @@ impl Actor {
 }
 
 /// One line per command, as named fields (no Debug dump of the media).
+/// One line per report, every field named, plus a summary for people:
+/// "1080p · 1920×1080 · H.264 · 23.98 fps · 5.2 Mb/s | AAC · 48 kHz · stereo".
+fn log_info(gen: u64, i: &castable_core::MediaInfo) {
+    let (v, a) = (i.video.clone().unwrap_or_default(), i.audio.clone().unwrap_or_default());
+    tracing::info!(
+        event = "info",
+        gen,
+        resolution = i.resolution_label().unwrap_or(""),
+        width = v.width,
+        height = v.height,
+        video_codec = v.codec.as_deref().unwrap_or(""),
+        fps = v.fps,
+        video_bps = v.bitrate_bps,
+        hdr = v.hdr.as_deref().unwrap_or(""),
+        pixel_format = v.pixel_format.as_deref().unwrap_or(""),
+        audio_codec = a.codec.as_deref().unwrap_or(""),
+        sample_rate_hz = a.sample_rate_hz,
+        channels = a.channels,
+        audio_bps = a.bitrate_bps,
+        container = i.container.as_deref().unwrap_or(""),
+        bitrate_bps = i.bitrate_bps,
+        decoder = i.decoder.as_deref().unwrap_or(""),
+        summary = %i.summary(),
+        "media info"
+    );
+}
+
 fn log_command(c: &PlayerCommand) {
     match c {
         PlayerCommand::Load { gen, media } => tracing::info!(
             command = "load",
             gen = gen.0,
             url = %media.url,
-            title = media.title.as_deref().unwrap_or(""),
+            title = %media.display_title(),
+            host = %media.host(),
+            format = media.format().unwrap_or(""),
+            kind = ?media.kind,
             mime = media.mime.as_deref().unwrap_or(""),
             live = media.is_live(),
+            headers = media.headers.len(),
             "player command"
         ),
         PlayerCommand::Seek { to } => tracing::info!(command = "seek", to_s = to.as_secs_f64(), "player command"),

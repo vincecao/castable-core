@@ -112,20 +112,8 @@ impl Tail {
 /// A line worth keeping: no terminal colours, no blank or status lines
 /// (mpv's "(Paused) AV: 00:00:01 / ...", "Exiting... (Errors when loading file)").
 pub fn meaningful(line: &str) -> Option<String> {
-    let mut clean = String::with_capacity(line.len());
-    let mut chars = line.split('\r').next_back().unwrap_or("").chars();
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            // Skip an escape sequence: ESC [ ... letter.
-            for c in chars.by_ref() {
-                if c.is_ascii_alphabetic() {
-                    break;
-                }
-            }
-        } else {
-            clean.push(c);
-        }
-    }
+    let last = line.split('\r').next_back().unwrap_or("");
+    let clean = strip_ansi_escapes::strip_str(last);
     let clean = clean.trim();
     let status = ["(Paused)", "AV:", "A:", "V:", "Exiting...", "Playing:", "(+)"];
     (!clean.is_empty() && !status.iter().any(|s| clean.starts_with(s))).then(|| clean.to_owned())

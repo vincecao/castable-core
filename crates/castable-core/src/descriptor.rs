@@ -90,6 +90,38 @@ impl MediaDescriptor {
         Self { kind, mime, ..Self::video(url) }
     }
 
+    /// The server's host (and port, if not the default), for logs and status.
+    pub fn host(&self) -> String {
+        url::Url::parse(&self.url)
+            .ok()
+            .and_then(|u| {
+                let host = u.host_str()?.to_owned();
+                Some(u.port().map_or(host.clone(), |p| format!("{host}:{p}")))
+            })
+            .unwrap_or_default()
+    }
+
+    /// The delivery format, from the MIME type or the URL: "hls", "dash",
+    /// "mp4", "webm", "matroska", "mpegts", "mp3"... `None` if unclear.
+    pub fn format(&self) -> Option<&'static str> {
+        let mime = self.mime.as_deref().unwrap_or("").to_ascii_lowercase();
+        let path = self.url.split(['?', '#']).next().unwrap_or("").to_ascii_lowercase();
+        let ext = path.rsplit_once('.').map(|(_, e)| e).filter(|e| !e.contains('/')).unwrap_or("");
+        Some(match (mime.as_str(), ext) {
+            (m, _) if m.contains("mpegurl") => "hls",
+            (_, "m3u8") => "hls",
+            (m, _) if m.contains("dash") => "dash",
+            (_, "mpd") => "dash",
+            ("video/mp4" | "audio/mp4", _) | (_, "mp4" | "m4v" | "m4a" | "mov") => "mp4",
+            ("video/webm" | "audio/webm", _) | (_, "webm") => "webm",
+            ("video/x-matroska", _) | (_, "mkv") => "matroska",
+            ("video/mp2t", _) | (_, "ts" | "m2ts") => "mpegts",
+            ("audio/mpeg", _) | (_, "mp3") => "mp3",
+            ("audio/flac", _) | (_, "flac") => "flac",
+            _ => return None,
+        })
+    }
+
     /// What to call the media on screen: the sender's title, else the URL's
     /// file name decoded (`%E5%90%8E%E4%BC%9A.mp4` → `后会`), else its host.
     /// The UIs (`titleOf` in TypeScript) follow the same rule.
@@ -97,10 +129,11 @@ impl MediaDescriptor {
         if let Some(t) = self.title.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
             return t.to_owned();
         }
-        let rest = self.url.split_once("://").map_or(self.url.as_str(), |(_, r)| r);
-        let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
-        let path = path.split(['?', '#']).next().unwrap_or("");
-        let file = percent_decode(path.rsplit('/').find(|s| !s.is_empty()).unwrap_or(""));
+        let file = url::Url::parse(&self.url)
+            .ok()
+            .and_then(|u| u.path_segments()?.rev().find(|s| !s.is_empty()).map(str::to_owned))
+            .map(|f| percent_encoding::percent_decode_str(&f).decode_utf8_lossy().into_owned())
+            .unwrap_or_default();
         let stem = match file.rsplit_once('.') {
             Some((stem, ext))
                 if !stem.is_empty()
@@ -112,32 +145,11 @@ impl MediaDescriptor {
             _ => file.as_str(),
         };
         if stem.is_empty() {
-            host.to_owned()
+            self.host()
         } else {
             stem.to_owned()
         }
     }
-}
-
-/// `%XX` escapes to bytes, read as UTF-8 (invalid sequences become U+FFFD).
-fn percent_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        let hex = |b: u8| (b as char).to_digit(16);
-        match (bytes[i], bytes.get(i + 1).and_then(|&b| hex(b)), bytes.get(i + 2).and_then(|&b| hex(b))) {
-            (b'%', Some(hi), Some(lo)) => {
-                out.push((hi * 16 + lo) as u8);
-                i += 3;
-            }
-            (b, _, _) => {
-                out.push(b);
-                i += 1;
-            }
-        }
-    }
-    String::from_utf8_lossy(&out).into_owned()
 }
 
 #[cfg(test)]
@@ -155,5 +167,15 @@ mod title_tests {
         let mut m = MediaDescriptor::video("http://x/a.mp4");
         m.title = Some("  后会友期 ".into());
         assert_eq!(m.display_title(), "后会友期");
+    }
+
+    #[test]
+    fn host_and_format_for_logs() {
+        let m = MediaDescriptor::video("https://user:pw@cdn.example.com:8443/hls/6b09e9cc87066.m3u8?sign=x");
+        assert_eq!((m.host().as_str(), m.format()), ("cdn.example.com:8443", Some("hls")));
+        let mut m = MediaDescriptor::video("http://x/play?id=1");
+        assert_eq!(m.format(), None);
+        m.mime = Some("video/mp4".into());
+        assert_eq!(m.format(), Some("mp4"));
     }
 }

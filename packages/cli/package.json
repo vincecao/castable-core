@@ -4,7 +4,9 @@
   "description": "castable: a keyboard-driven setup wizard and live status for the Castable receiver.",
   "license": "MIT",
   "type": "module",
-  "bin": { "castable": "./bin/castable.mjs" },
+  "bin": {
+    "castable": "./bin/castable.mjs"
+  },
   "scripts": {
     "start": "tsx src/cli.tsx",
     "setup": "tsx src/cli.tsx setup",
@@ -14,10 +16,12 @@
   "dependencies": {
     "@castable/protocol": "workspace:*",
     "ink": "^6.0.0",
+    "lodash-es": "^4.18.1",
     "react": "^19.0.0",
     "tsx": "^4.20.0"
   },
   "devDependencies": {
+    "@types/lodash-es": "^4.17.12",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "typescript": "^5.9.0"

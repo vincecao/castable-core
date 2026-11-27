@@ -21,6 +21,8 @@ fn views() -> String {
     step(&mut s, Input::Sender(SenderCommand::SetUri(media)));
     step(&mut s, Input::Sender(SenderCommand::Play));
     step(&mut s, Input::Player(PlayerEvent::Loaded { gen: Gen(1), duration: Some(Duration::from_secs(1500)) }));
+    // What the player found out; not a view of its own (keeps the view numbers).
+    s.handle(Input::Player(PlayerEvent::Info { gen: Gen(1), info: Box::new(sample_info()) })).unwrap();
     step(
         &mut s,
         Input::Player(PlayerEvent::Progress {
@@ -46,6 +48,27 @@ fn views() -> String {
     step(&mut s, Input::Sender(SenderCommand::Play));
     step(&mut s, Input::Player(PlayerEvent::Loaded { gen: Gen(2), duration: None }));
     serde_json::to_string_pretty(&out).unwrap()
+}
+
+fn sample_info() -> MediaInfo {
+    MediaInfo {
+        container: Some("hls".into()),
+        bitrate_bps: Some(5_200_000),
+        decoder: Some("videotoolbox".into()),
+        video: Some(VideoInfo {
+            codec: Some("h264".into()),
+            width: Some(1920),
+            height: Some(1080),
+            fps: Some(23.976),
+            ..Default::default()
+        }),
+        audio: Some(AudioInfo {
+            codec: Some("aac".into()),
+            sample_rate_hz: Some(48_000),
+            channels: Some(2),
+            bitrate_bps: None,
+        }),
+    }
 }
 
 fn root() -> PathBuf {
@@ -87,6 +110,7 @@ fn protocol() -> String {
         },
         PlayerEvent::Ended { gen: Gen(1) },
         PlayerEvent::Closed { gen: Gen(1) },
+        PlayerEvent::Info { gen: Gen(1), info: Box::new(sample_info()) },
     ];
     let sender = vec![
         SenderCommand::SetUri(media),

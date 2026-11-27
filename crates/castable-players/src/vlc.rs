@@ -2,9 +2,8 @@
 //! random password per cast.
 
 use crate::diagnose::Tail;
-use castable_net::{CastError, ErrorCode, Gen, Handle, PlayerCommand, PlayerEvent};
+use castable_net::{AudioInfo, CastError, ErrorCode, Gen, Handle, MediaInfo, PlayerCommand, PlayerEvent, VideoInfo};
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 /// The remote commands for one control.
@@ -25,6 +24,7 @@ pub fn encode(ctl: &PlayerCommand) -> Vec<String> {
 pub struct Remote {
     pub port: u16,
     pub password: String,
+    http: reqwest::Client,
 }
 
 impl Remote {
@@ -32,23 +32,22 @@ impl Remote {
         // A free port, released for VLC to take a moment later.
         let port =
             std::net::TcpListener::bind(("127.0.0.1", 0)).and_then(|l| l.local_addr()).map_or(8080, |a| a.port());
-        Self { port, password: uuid::Uuid::new_v4().simple().to_string() }
+        Self { port, password: uuid::Uuid::new_v4().simple().to_string(), http: reqwest::Client::new() }
     }
 
     /// GET /requests/status.json[?command=...]; returns the JSON body.
-    async fn status(&self, command: Option<&str>) -> std::io::Result<serde_json::Value> {
-        let path = command.map_or("/requests/status.json".into(), |c| format!("/requests/status.json?command={c}"));
-        let auth = base64(format!(":{}", self.password).as_bytes());
-        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", self.port)).await?;
-        let req = format!(
-            "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Basic {auth}\r\nConnection: close\r\n\r\n"
-        );
-        stream.write_all(req.as_bytes()).await?;
-        let mut raw = Vec::new();
-        stream.read_to_end(&mut raw).await?;
-        let raw = String::from_utf8_lossy(&raw);
-        let body = raw.split_once("\r\n\r\n").map_or("", |(_, b)| b);
-        serde_json::from_str(body).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    async fn status(&self, command: Option<&str>) -> reqwest::Result<serde_json::Value> {
+        let base = format!("http://127.0.0.1:{}/requests/status.json", self.port);
+        let url = command.map_or(base.clone(), |c| format!("{base}?command={c}"));
+        self.http
+            .get(url)
+            .basic_auth("", Some(&self.password))
+            .timeout(Duration::from_secs(2))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await
     }
 }
 
@@ -69,6 +68,7 @@ pub async fn session(
     let started = Instant::now();
     let mut poll = tokio::time::interval(Duration::from_millis(500));
     let (mut loaded, mut last_progress) = (false, Instant::now());
+    let mut reported = MediaInfo::default();
     let mut pending: Vec<String> = Vec::new();
     loop {
         tokio::select! {
@@ -92,6 +92,10 @@ pub async fn session(
                 let state = status["state"].as_str().unwrap_or("stopped");
                 let duration = status["length"].as_u64().filter(|&s| s > 0).map(Duration::from_secs);
                 let position = status["time"].as_u64().map(Duration::from_secs).unwrap_or_default();
+                if let Some(info) = media_info(&status).filter(|i| i.differs_notably(&reported)) {
+                    reported = info.clone();
+                    handle.player_event(PlayerEvent::Info { gen, info: Box::new(info) });
+                }
                 if !loaded && (state == "playing" || state == "paused") {
                     loaded = true;
                     handle.player_event(PlayerEvent::Loaded { gen, duration });
@@ -104,17 +108,64 @@ pub async fn session(
     }
 }
 
-fn base64(input: &[u8]) -> String {
-    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
-    for chunk in input.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-        for i in 0..4 {
-            out.push(if i <= chunk.len() { T[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
+/// The media info VLC's status lists under `information.category`, one entry
+/// per stream ("Stream 0": Type, Codec, Video_resolution, Frame_rate,
+/// Sample_rate, Channels). Bitrates aren't reliable there, so none.
+fn media_info(status: &serde_json::Value) -> Option<MediaInfo> {
+    let streams = status["information"]["category"].as_object()?;
+    let mut info = MediaInfo::default();
+    for stream in streams.values() {
+        let field = |k: &str| stream[k].as_str().map(str::trim).filter(|v| !v.is_empty());
+        let codec = field("Codec").map(vlc_codec);
+        match field("Type") {
+            Some("Video") => {
+                let size = field("Video_resolution").or(field("Buffer_dimensions"));
+                let (w, h) = size.and_then(|s| s.split_once('x')).unzip();
+                info.video = Some(VideoInfo {
+                    codec,
+                    width: w.and_then(|w| w.trim().parse().ok()),
+                    height: h.and_then(|h| h.trim().parse().ok()),
+                    fps: field("Frame_rate").and_then(|f| f.parse().ok()),
+                    ..Default::default()
+                });
+            }
+            Some("Audio") => {
+                info.audio = Some(AudioInfo {
+                    codec,
+                    sample_rate_hz: field("Sample_rate").and_then(|r| r.trim_end_matches(" Hz").parse().ok()),
+                    channels: field("Channels").and_then(|c| match c {
+                        "Mono" => Some(1),
+                        "Stereo" => Some(2),
+                        c if c.contains("5.1") => Some(6),
+                        c if c.contains("7.1") => Some(8),
+                        c => c.parse().ok(),
+                    }),
+                    ..Default::default()
+                });
+            }
+            _ => {}
         }
     }
-    out
+    (!info.is_empty()).then_some(info)
+}
+
+/// VLC's "H264 - MPEG-4 AVC (part 10) (avc1)" → "h264", by its FourCC.
+fn vlc_codec(codec: &str) -> String {
+    let fourcc = codec.rsplit_once('(').map_or(codec, |(_, f)| f.trim_end_matches(')')).trim().to_ascii_lowercase();
+    match fourcc.as_str() {
+        "avc1" | "h264" => "h264",
+        "hevc" | "hvc1" | "hev1" => "hevc",
+        "av01" => "av1",
+        "vp09" | "vp90" => "vp9",
+        "mp4a" => "aac",
+        "a52 " | "a52" => "ac3",
+        "eac3" => "eac3",
+        "mpga" | "mp3 " => "mp3",
+        "opus" => "opus",
+        "flac" => "flac",
+        other => return other.to_owned(),
+    }
+    .to_owned()
 }
 
 #[cfg(test)]
@@ -122,10 +173,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn base64_matches_known_values() {
-        assert_eq!(base64(b":secret"), "OnNlY3JldA==");
-        assert_eq!(base64(b"ab"), "YWI=");
-        assert_eq!(base64(b"abc"), "YWJj");
+    fn media_info_from_vlc_status() {
+        let status = serde_json::json!({"information":{"category":{
+            "meta":{"filename":"x.m3u8"},
+            "Stream 0":{"Type":"Video","Codec":"H264 - MPEG-4 AVC (part 10) (avc1)","Video_resolution":"1920x1080","Frame_rate":"23.976024"},
+            "Stream 1":{"Type":"Audio","Codec":"MPEG AAC Audio (mp4a)","Sample_rate":"48000 Hz","Channels":"Stereo"}
+        }}});
+        let i = media_info(&status).unwrap();
+        assert_eq!(i.summary(), "1080p · 1920×1080 · H.264 · 23.98 fps | AAC · 48 kHz · stereo");
+        assert_eq!(media_info(&serde_json::json!({"state":"playing"})), None);
     }
 
     #[test]

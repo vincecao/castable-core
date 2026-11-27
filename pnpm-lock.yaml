@@ -16,6 +16,9 @@ importers:
       ink:
         specifier: ^6.0.0
         version: 6.8.0(@types/react@19.3.3)(react@19.3.1)
+      lodash-es:
+        specifier: ^4.18.1
+        version: 4.18.1
       react:
         specifier: ^19.0.0
         version: 19.3.1
@@ -23,6 +26,9 @@ importers:
         specifier: ^4.20.0
         version: 4.23.15
     devDependencies:
+      '@types/lodash-es':
+        specifier: ^4.17.12
+        version: 4.17.12
       '@types/node':
         specifier: ^22.0.0
         version: 22.20.7
@@ -201,6 +207,12 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@types/lodash-es@4.17.12':
+    resolution: {integrity: sha512-0NgftHUcV4v34VhXm8QBSftKVXtbkBG3ViCjs6+eJ5a6y6Mi/jiFGPc1sC7QK+9BFhWrURE3EOggmWaSxL9OzQ==}
+
+  '@types/lodash@4.17.28':
+    resolution: {integrity: sha512-2iP9dTMtHQOGZq086o7CyIVz5h3hCS7xqG1dZg3hfbxqcB5/ZaFD+vOp9ebR8YlbCQr84OQjBiv/qgITjHSrYA==}
+
   '@types/node@22.20.7':
     resolution: {integrity: sha512-F/Mcc4pD3YwXQCG50hb8BjB5RmrOere6hge7n2XHf0V8tpkZOVEjwYv9Ql7n0MpMn8Bv7+q12P9w6UHsBm0Sfw==}
 
@@ -303,6 +315,9 @@ packages:
     resolution: {integrity: sha512-cFeerHriAnhrQSbpAxL37W1wcJKUUX07HyLWZCW1URJT/ra3GyUTzBgUnh24TMVfNTV2Hij2HLxkPHFZfOZy5w==}
     engines: {node: '>=20'}
     hasBin: true
+
+  lodash-es@4.18.1:
+    resolution: {integrity: sha512-J8xewKD/Gk22OZbhpOVSwcs60zhd95ESDwezOFuA3/099925PdHJ7OFHNTGtajL3AlZkykD32HykiMo+BIBI8A==}
 
   mimic-fn@2.1.0:
     resolution: {integrity: sha512-OqbOk5oEQeAZ8WXWydlu9HJjz9WVdEIvamMCcXmuqUYjTknH/sqsWvhQ3vgwKFRR1HpjvNBKQ37nbJgYzGqGcg==}
@@ -489,6 +504,12 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
+  '@types/lodash-es@4.17.12':
+    dependencies:
+      '@types/lodash': 4.17.28
+
+  '@types/lodash@4.17.28': {}
+
   '@types/node@22.20.7':
     dependencies:
       undici-types: 6.21.0
@@ -611,6 +632,8 @@ snapshots:
       get-east-asian-width: 1.7.0
 
   is-in-ci@2.0.0: {}
+
+  lodash-es@4.18.1: {}
 
   mimic-fn@2.1.0: {}
 

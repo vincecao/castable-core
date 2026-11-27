@@ -117,7 +117,7 @@ Inputs come from two sides and produce **`PlayerCommand`s** for whoever plays th
 | --- | --- | --- |
 | Sender commands | `SenderCommand` (`SetUri`, `Play`, `Pause`, `Stop`, `Seek`) | A phone, via SOAP. Volume and mute skip the session: the renderer turns them straight into `SetVolume` / `SetMuted` |
 | Screen presses | `ScreenCommand { gen, command }` | The receiver's own screen, remote or keyboard. `gen` is the cast the screen showed; a press on a replaced cast is dropped |
-| Player events | `PlayerEvent` (`Loaded`, `LoadFailed`, `Progress`, `Ended`, `Closed`) — each tagged with a `Gen` | The player. `Closed`: it went away (process exited, window closed), so nothing is loaded |
+| Player events | `PlayerEvent` (`Loaded`, `LoadFailed`, `Progress`, `Ended`, `Closed`, `Info`) — each tagged with a `Gen` | The player. `Closed`: it went away (process exited, window closed), so nothing is loaded. `Info`: what it found out about the media (`MediaInfo`: resolution, codecs, fps, bitrates, HDR, audio format, container, hardware decoder); merged into the cast and shown in the loaded view |
 | Output | `PlayerCommand` (`Load{gen,media}`, `Play`, `Pause`, `Stop`, `Seek`, `SetVolume`, `SetMuted`) | → the player |
 
 The transitions are pure functions, `Phase::on_sender(self, cmd) -> (Phase, Result<Vec<PlayerCommand>, UpnpError>)`
@@ -206,6 +206,12 @@ control = "mpv-ipc"   # mpv-ipc | vlc-http | launch
 | `vlc-http` | Full control and real events | VLC's web interface, polled every 500 ms |
 | `launch` | Start and stop | Spawn the program; `Loaded` is assumed; Stop closes it and reports `Closed` |
 
+**Media info.** mpv/IINA observe `video-params`, `video-format`, `container-fps`, `audio-params`,
+`audio-codec-name`, bitrates, `file-format`, `hwdec-current` and `hls-bitrate`; VLC reads its
+status's stream list. Each reports `PlayerEvent::Info` once a burst of changes settles and only
+when something notable changed (`MediaInfo::differs_notably`: any field, or a bitrate moving more
+than 25%), so a wobbling bitrate doesn't flood the log.
+
 Placeholders: `{url} {title} {referer} {user_agent} {headers} {ipc} {port} {password}`. An argument
 whose placeholder has no value is left out; a group such as `["-window_title", "{title}"]` is dropped whole. Specs are validated on load
 (unknown placeholder, missing `{url}`, a control that needs `{ipc}` or `{port}`), and errors name
@@ -235,7 +241,10 @@ in TypeScript.
 - **Live status** (`status.ts`): runs the receiver with `--log json` and folds each log line
   (`ready`, `transport`, `player command`, `player event`, `control refused`) into a status view.
   Keys: `q` stop, `l` open the log file (its path comes in the `ready` line), `r` write a report
-  next to it and open it.
+  next to it and open it; keys and the hint line come from one table. The "now playing" panel
+  shows the title, source (host, format, live), sender (app, IP), quality (`media info` summary),
+  hardware decoder and position; recent lines are timestamped. Components follow the codebase's
+  React pattern: one per file, `function` + `export default memo(...)`.
 
 ## 7. Logging
 
@@ -248,8 +257,10 @@ for example `RUST_LOG=castable_net=debug`.
 | --- | --- |
 | `ready` | `name`, `player`, `control`, `url` |
 | `control` / `control refused` | `action` (+ `code`, `error`, `category`, `upnp` when refused) |
-| `player command` | `command`, plus `gen`, `url`, `title`, `live` on load, `to_s` on seek, `volume` |
-| `player event` | `event` (`loaded`, `load_failed`, `ended`, `closed`), `gen` (+ `code`, `error`, `category`, `detail`, `summary` on a failed load) |
+| `cast from` | `peer` (the phone's IP), `user_agent` (its app) |
+| `player command` | `command`, plus `gen`, `url`, `title` (decoded), `host`, `format` (hls, mp4…), `kind`, `mime`, `live`, `headers` on load, `to_s` on seek, `volume` |
+| `media info` | `resolution`, `width`, `height`, `video_codec`, `fps`, `video_bps`, `hdr`, `pixel_format`, `audio_codec`, `sample_rate_hz`, `channels`, `audio_bps`, `container`, `bitrate_bps`, `decoder`, and `summary` (`1080p · 1920×1080 · H.264 · 23.98 fps · 5.2 Mb/s \| AAC · 48 kHz · stereo`) |
+| `player event` | `event` (`loaded`, `load_failed`, `ended`, `closed`), `gen` (+ `code`, `error`, `category`, `detail`, `summary` on a failed load); at trace, `progress` with `position_s`, `duration_s` |
 | `player says` (debug) | `output`: a line the player printed (+ `code`, `error` if it names a known error) |
 | `screen press` / `screen press refused` | `command`, `gen` (+ `code`, `error` when refused) |
 | `transport` | `from`, `to`, `gen` |
@@ -288,6 +299,13 @@ Rust is the source of truth. TypeScript mirrors live in `packages/protocol/src/i
 ```sh
 UPDATE_FIXTURES=1 cargo test --test fixtures && pnpm typecheck
 ```
+
+## 8.1 Libraries
+
+Well-known crates over hand-written code where they fit: `url` and `percent-encoding` (URLs,
+titles), `quick-xml`, `serde`, `toml`, `thiserror`, `tokio`, `hyper`, `tracing`, `which` (finding
+player programs), `shell-words` (player command lines; on Windows put paths in single quotes),
+`strip-ansi-escapes` (player output), `reqwest` (VLC's web remote). TypeScript: `lodash-es`.
 
 ## 9. Design rules
 

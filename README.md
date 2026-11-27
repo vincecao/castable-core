@@ -37,7 +37,8 @@ and pick the name you chose.
 ```sh
 pnpm castable            # start (or set up, the first time)
 pnpm castable setup      # change name, player or port
-pnpm castable start      # start with the live status screen: q stop · l open the log · r write a report
+pnpm castable start      # live status: what's playing, from which phone, resolution, codecs, bitrate,
+                         # position; q stop · l open the log · r write a report
 pnpm castable players    # which players this computer has
 ```
 

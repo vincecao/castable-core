@@ -56,6 +56,8 @@ export type ReceiverView = { transportState: TransportState } & (
       playback: "stopped" | "playing" | "paused";
       positionSecs: number;
       durationSecs?: number;
+      /** What the player reported: resolution, codecs, bitrates. */
+      info?: MediaInfo;
     }
   | { phase: "unloaded"; gen: Gen; media: MediaDescriptor; error?: CastError }
 );
@@ -80,7 +82,9 @@ export type PlayerEvent =
   | { type: "progress"; gen: Gen; positionSecs: number; durationSecs?: number }
   | { type: "ended"; gen: Gen }
   /** The player went away (its process exited, its window was closed): nothing is loaded. */
-  | { type: "closed"; gen: Gen };
+  | { type: "closed"; gen: Gen }
+  /** What the player found out about the media; may come again as it learns more. */
+  | { type: "info"; gen: Gen; info: MediaInfo };
 
 /** Commands from a sender (a phone), or inside a `ScreenCommand`. Mirrors `SenderCommand`. */
 export type SenderCommand =
@@ -155,4 +159,32 @@ export interface ErrorReport {
 export interface CastError extends ErrorReport {
   id: string;
   category: ErrorCategory;
+}
+
+/** What a player found out about the media. Every field is optional: players fill what they know. Mirrors `MediaInfo`. */
+export interface MediaInfo {
+  /** "hls", "dash", "mp4", "matroska", "mpegts", ... */
+  container?: string;
+  /** The whole stream's bitrate (an HLS variant's, say). */
+  bitrateBps?: number;
+  /** The hardware decoder in use ("videotoolbox", "d3d11va"). */
+  decoder?: string;
+  video?: {
+    /** "h264", "hevc", "av1", "vp9", ... */
+    codec?: string;
+    width?: number;
+    height?: number;
+    fps?: number;
+    bitrateBps?: number;
+    /** "HDR10", "HLG", "Dolby Vision"; absent for SDR. */
+    hdr?: string;
+    pixelFormat?: string;
+  };
+  audio?: {
+    /** "aac", "opus", "eac3", ... */
+    codec?: string;
+    sampleRateHz?: number;
+    channels?: number;
+    bitrateBps?: number;
+  };
 }

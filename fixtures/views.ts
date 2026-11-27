@@ -56,6 +56,22 @@ export const views = [
   {
     "durationSecs": 1500.0,
     "gen": 1,
+    "info": {
+      "audio": {
+        "channels": 2,
+        "codec": "aac",
+        "sampleRateHz": 48000
+      },
+      "bitrateBps": 5200000,
+      "container": "hls",
+      "decoder": "videotoolbox",
+      "video": {
+        "codec": "h264",
+        "fps": 23.976,
+        "height": 1080,
+        "width": 1920
+      }
+    },
     "media": {
       "delivery": {
         "type": "onDemand"
@@ -73,6 +89,22 @@ export const views = [
   {
     "durationSecs": 1500.0,
     "gen": 1,
+    "info": {
+      "audio": {
+        "channels": 2,
+        "codec": "aac",
+        "sampleRateHz": 48000
+      },
+      "bitrateBps": 5200000,
+      "container": "hls",
+      "decoder": "videotoolbox",
+      "video": {
+        "codec": "h264",
+        "fps": 23.976,
+        "height": 1080,
+        "width": 1920
+      }
+    },
     "media": {
       "delivery": {
         "type": "onDemand"
@@ -90,6 +122,22 @@ export const views = [
   {
     "durationSecs": 1500.0,
     "gen": 1,
+    "info": {
+      "audio": {
+        "channels": 2,
+        "codec": "aac",
+        "sampleRateHz": 48000
+      },
+      "bitrateBps": 5200000,
+      "container": "hls",
+      "decoder": "videotoolbox",
+      "video": {
+        "codec": "h264",
+        "fps": 23.976,
+        "height": 1080,
+        "width": 1920
+      }
+    },
     "media": {
       "delivery": {
         "type": "onDemand"

@@ -2,7 +2,7 @@
 
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// The players that ship with Castable.
 pub const BUILT_IN: &str = include_str!("../players.toml");
@@ -162,35 +162,10 @@ impl PlayerSpec {
 }
 
 /// Splits a command line into words, keeping "double" or 'single' quoted parts together.
+/// Splits a player command line like a POSIX shell (quotes, escapes). On
+/// Windows, put paths in single quotes so their backslashes stay as they are.
 fn split(line: &str) -> Result<Vec<String>, String> {
-    let (mut words, mut word, mut quote, mut in_word) = (Vec::new(), String::new(), None, false);
-    for c in line.chars() {
-        match (quote, c) {
-            (Some(q), c) if c == q => quote = None,
-            (Some(_), c) => word.push(c),
-            (None, '"' | '\'') => {
-                quote = Some(c);
-                in_word = true;
-            }
-            (None, c) if c.is_whitespace() => {
-                if in_word {
-                    words.push(std::mem::take(&mut word));
-                    in_word = false;
-                }
-            }
-            (None, c) => {
-                word.push(c);
-                in_word = true;
-            }
-        }
-    }
-    if quote.is_some() {
-        return Err(format!("unclosed quote in player command: {line}"));
-    }
-    if in_word {
-        words.push(word);
-    }
-    Ok(words)
+    shell_words::split(line).map_err(|e| format!("player command {line:?}: {e}"))
 }
 
 const KNOWN: &[&str] = &["url", "title", "referer", "user_agent", "headers", "font", "ipc", "port", "password"];
@@ -209,15 +184,10 @@ fn fill(word: &str, vars: &Vars) -> Option<String> {
     Some(out)
 }
 
+/// A program's path: an absolute path that exists, or a name found on PATH
+/// (with .exe and friends on Windows).
 fn which(program: &str) -> Option<PathBuf> {
-    let p = Path::new(program);
-    if p.components().count() > 1 {
-        return p.exists().then(|| p.to_path_buf());
-    }
-    let exts: &[&str] = if cfg!(windows) { &["", ".exe", ".cmd", ".bat"] } else { &[""] };
-    std::env::split_paths(&std::env::var_os("PATH")?)
-        .flat_map(|dir| exts.iter().map(move |e| dir.join(format!("{program}{e}"))))
-        .find(|c| c.is_file())
+    which::which(program).ok()
 }
 
 /// All known players: the built-in list, then each file in `extra` (later

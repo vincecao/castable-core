@@ -8,9 +8,11 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+percent-encoding = "2"
 quick-xml = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+url = "2"
 
 [dev-dependencies]
 serde_json = { workspace = true }
