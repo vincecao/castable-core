@@ -5,6 +5,7 @@
 //   castable start      run the receiver with a live status screen
 //   castable players    list the players this computer has
 
+import { dirname } from "node:path";
 import { render, Text, useApp, useInput } from "ink";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { initial, reduce, toToml, type State } from "./wizard.ts";
@@ -72,8 +73,26 @@ function Run({ bin }: { bin: string }) {
     c.on("close", () => exit());
     return () => sys.stopReceiver(c);
   }, []);
+  // Shortcuts: q quit, l open the log, r write a report and open it.
+  const note = (text: string, warn = false) =>
+    push(JSON.stringify({ level: warn ? "WARN" : "INFO", message: "note", text }));
   useInput((input, key) => {
-    if (input === "q" || (key.ctrl && input === "c")) child.current && sys.stopReceiver(child.current);
+    if (input === "q" || (key.ctrl && input === "c")) {
+      if (child.current) sys.stopReceiver(child.current);
+      return;
+    }
+    const logFile = status.ready?.logFile;
+    if (input === "l") {
+      if (!logFile) return note("no log file this run (--no-log-file?)", true);
+      note(sys.openFile(logFile) ? `opened the log: ${logFile}` : `the log is at ${logFile}`);
+    } else if (input === "r") {
+      try {
+        const report = sys.writeReport(bin, logFile ? dirname(logFile) : process.cwd());
+        note(sys.openFile(report) ? `report written and opened: ${report}` : `report written: ${report}`);
+      } catch (e) {
+        note(`couldn't write a report: ${e instanceof Error ? e.message : String(e)}`, true);
+      }
+    }
   });
   return <Dashboard status={status} />;
 }

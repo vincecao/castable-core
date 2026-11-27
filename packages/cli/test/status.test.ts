@@ -49,3 +49,14 @@ test("any coded error reads the same, with the summary when there's no detail", 
   const s = fold(initialStatus, `{"level":"ERROR","message":"can't start the player","code":"E101","error":"player_missing","summary":"the player isn't installed or can't start"}`);
   assert.equal(s.problem, "E101 player_missing: the player isn't installed or can't start");
 });
+
+test("the ready line carries the log file; shortcut notes show in the list", () => {
+  let s = fold(initialStatus, `{"level":"INFO","message":"ready","name":"Mac","player":"mpv","control":"full","url":"http://x/desc.xml","log_file":"/u/.config/castable/logs/receiver.log"}`);
+  assert.equal(s.ready?.logFile, "/u/.config/castable/logs/receiver.log");
+  s = fold(s, `{"level":"INFO","message":"note","text":"opened the log: /u/.config/castable/logs/receiver.log"}`);
+  assert.equal(s.recent.at(-1), "opened the log: /u/.config/castable/logs/receiver.log");
+  assert.equal(s.problem, null);
+  s = fold(s, `{"level":"WARN","message":"note","text":"couldn't write a report"}`);
+  assert.equal(s.problem, "couldn't write a report");
+});
+

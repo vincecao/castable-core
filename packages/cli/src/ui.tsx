@@ -154,7 +154,7 @@ export function Dashboard({ status }: { status: Status }) {
     );
   }
   return (
-    <Frame title={`“${status.ready.name}” is ready`} hint="q stop and quit · phones on the same Wi-Fi can cast now">
+    <Frame title={`“${status.ready.name}” is ready`} hint="q stop and quit · l open the log · r write a report · phones on the same Wi-Fi can cast now">
       <Text dimColor>
         player {status.ready.player} ({status.ready.control}) · {status.ready.url}
       </Text>

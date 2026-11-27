@@ -37,7 +37,7 @@ and pick the name you chose.
 ```sh
 pnpm castable            # start (or set up, the first time)
 pnpm castable setup      # change name, player or port
-pnpm castable start      # start with the live status screen; q to stop
+pnpm castable start      # start with the live status screen: q stop · l open the log · r write a report
 pnpm castable players    # which players this computer has
 ```
 
@@ -123,6 +123,8 @@ Castable's folder (the previous run's is `receiver.1.log`). To share it:
 ```sh
 pnpm castable report        # or: castable-receiver --report [FILE]
 ```
+
+While `pnpm castable start` runs, press `r` to write a report and open it, or `l` to open the log.
 
 This writes `castable-report-….md` with your OS, settings, players, the error codes seen and the
 last log lines. URL queries, passwords, tokens and cookies are replaced with `…`. Check it, then

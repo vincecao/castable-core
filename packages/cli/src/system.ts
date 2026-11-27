@@ -87,6 +87,28 @@ export function startReceiver(bin: string, config: string, onLine: (line: string
   return child;
 }
 
+/** Opens a file in its default app (a text editor or viewer). False if that can't start. */
+export function openFile(path: string): boolean {
+  const [cmd, args] =
+    process.platform === "darwin"
+      ? ["open", [path]]
+      : process.platform === "win32"
+        ? ["cmd", ["/c", "start", "", path]]
+        : ["xdg-open", [path]];
+  try {
+    spawn(cmd, args as string[], { stdio: "ignore", detached: true }).on("error", () => {}).unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Writes a report (the receiver gathers it; see `castable-receiver --report`) into `dir`; returns its path. */
+export function writeReport(bin: string, dir: string): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  return ask(bin, ["--report", join(dir, `castable-report-${stamp}.md`)]);
+}
+
 /** Stops the receiver so it can say goodbye on the network (SSDP byebye). */
 export function stopReceiver(child: ChildProcess): void {
   if (process.platform === "win32") child.kill();

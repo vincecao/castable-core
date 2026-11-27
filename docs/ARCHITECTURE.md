@@ -234,6 +234,8 @@ in TypeScript.
   and Esc. Writes `config.toml`.
 - **Live status** (`status.ts`): runs the receiver with `--log json` and folds each log line
   (`ready`, `transport`, `player command`, `player event`, `control refused`) into a status view.
+  Keys: `q` stop, `l` open the log file (its path comes in the `ready` line), `r` write a report
+  next to it and open it.
 
 ## 7. Logging
 

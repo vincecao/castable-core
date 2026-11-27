@@ -5,7 +5,7 @@
 import type { TransportState } from "@castable/protocol";
 
 export interface Status {
-  ready: { name: string; url: string; player: string; control: string } | null;
+  ready: { name: string; url: string; player: string; control: string; logFile: string } | null;
   state: TransportState;
   /** The cast on screen: its title (or URL) and whether it's live. */
   now: { title: string; url: string } | null;
@@ -59,8 +59,17 @@ export function fold(status: Status, raw: string): Status {
     case "ready":
       return {
         ...status,
-        ready: { name: str(line.name), url: str(line.url), player: str(line.player), control: str(line.control) },
+        ready: {
+          name: str(line.name),
+          url: str(line.url),
+          player: str(line.player),
+          control: str(line.control),
+          logFile: str(line.log_file),
+        },
       };
+    // From the status screen itself (a shortcut's result), not the receiver.
+    case "note":
+      return say(str(line.text), level === "WARN" ? { problem: str(line.text) } : {});
     case "transport":
       return say(`${str(line.from)} → ${str(line.to)}`, { state: str(line.to) as TransportState });
     case "player command":
