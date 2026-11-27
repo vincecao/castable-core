@@ -26,6 +26,14 @@ export const protocol = {
     {
       "toSecs": 30.5,
       "type": "seek"
+    },
+    {
+      "type": "setVolume",
+      "volume": 70
+    },
+    {
+      "muted": true,
+      "type": "setMuted"
     }
   ],
   "events": [

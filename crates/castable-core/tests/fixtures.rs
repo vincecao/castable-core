@@ -63,6 +63,8 @@ fn protocol() -> String {
         PlayerCommand::Pause,
         PlayerCommand::Stop,
         PlayerCommand::Seek { to: Duration::from_millis(30_500) },
+        PlayerCommand::SetVolume { volume: 70 },
+        PlayerCommand::SetMuted { muted: true },
     ];
     let events = vec![
         PlayerEvent::Loaded { gen: Gen(1), duration: Some(Duration::from_secs(90)) },

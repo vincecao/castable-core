@@ -2,7 +2,7 @@
 //! it through [`Msg`], so there are no locks and every change is ordered.
 
 use crate::gena::{Delivery, SubscribeRequest, Subscriptions};
-use castable_core::{Action, Command, PlayerCommand, PlayerEvent, Renderer, Reply, Service, TransportState, UpnpError};
+use castable_core::{Action, PlayerCommand, PlayerEvent, Renderer, Reply, Service, TransportState, UpnpError};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -25,12 +25,12 @@ pub struct Actor {
     /// The last transport state logged, so each change is logged once.
     logged_state: TransportState,
     subs: Subscriptions,
-    commands: mpsc::UnboundedSender<Command>,
+    commands: mpsc::UnboundedSender<PlayerCommand>,
     notifier: mpsc::UnboundedSender<Delivery>,
 }
 
 impl Actor {
-    pub fn spawn(commands: mpsc::UnboundedSender<Command>) -> mpsc::UnboundedSender<Msg> {
+    pub fn spawn(commands: mpsc::UnboundedSender<PlayerCommand>) -> mpsc::UnboundedSender<Msg> {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let (notifier, notify_rx) = mpsc::unbounded_channel();
         tokio::spawn(deliver_all(notify_rx));
@@ -127,9 +127,9 @@ impl Actor {
 }
 
 /// One line per command, as named fields (no Debug dump of the media).
-fn log_command(c: &Command) {
+fn log_command(c: &PlayerCommand) {
     match c {
-        Command::Player(PlayerCommand::Load { gen, media }) => tracing::info!(
+        PlayerCommand::Load { gen, media } => tracing::info!(
             command = "load",
             gen = gen.0,
             url = %media.url,
@@ -138,14 +138,12 @@ fn log_command(c: &Command) {
             live = media.is_live(),
             "player command"
         ),
-        Command::Player(PlayerCommand::Seek { to }) => {
-            tracing::info!(command = "seek", to_s = to.as_secs_f64(), "player command")
-        }
-        Command::Player(PlayerCommand::Play) => tracing::info!(command = "play", "player command"),
-        Command::Player(PlayerCommand::Pause) => tracing::info!(command = "pause", "player command"),
-        Command::Player(PlayerCommand::Stop) => tracing::info!(command = "stop", "player command"),
-        Command::SetVolume(v) => tracing::info!(command = "volume", volume = v, "player command"),
-        Command::SetMuted(m) => tracing::info!(command = "mute", muted = m, "player command"),
+        PlayerCommand::Seek { to } => tracing::info!(command = "seek", to_s = to.as_secs_f64(), "player command"),
+        PlayerCommand::Play => tracing::info!(command = "play", "player command"),
+        PlayerCommand::Pause => tracing::info!(command = "pause", "player command"),
+        PlayerCommand::Stop => tracing::info!(command = "stop", "player command"),
+        PlayerCommand::SetVolume { volume } => tracing::info!(command = "volume", volume, "player command"),
+        PlayerCommand::SetMuted { muted } => tracing::info!(command = "mute", muted, "player command"),
     }
 }
 

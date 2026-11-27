@@ -68,7 +68,9 @@ export type PlayerCommand =
   | { type: "play" }
   | { type: "pause" }
   | { type: "stop" }
-  | { type: "seek"; toSecs: number };
+  | { type: "seek"; toSecs: number }
+  | { type: "setVolume"; volume: number }
+  | { type: "setMuted"; muted: boolean };
 
 /** What the player reports back. Mirrors `PlayerEvent`. */
 export type PlayerEvent =

@@ -4,23 +4,23 @@
 //! values, so the same code runs on iOS, Android, desktop and WebAssembly.
 //! `castable-net` (later) does the I/O around it.
 
-pub mod descriptor;
+mod descriptor;
 pub mod device;
-pub mod didl;
-pub mod error;
-pub mod renderer;
+mod didl;
+mod error;
+mod renderer;
 pub mod service;
-pub mod session;
+mod session;
 pub mod soap;
-pub mod time;
-pub mod xml;
+mod time;
+mod xml;
 
 pub use descriptor::{Delivery, MediaDescriptor, MediaKind};
 pub use device::DeviceInfo;
 pub use error::UpnpError;
-pub use renderer::{Action, Command, Renderer, Reply};
+pub use renderer::{Action, Renderer, Reply};
 pub use service::Service;
 pub use session::{
-    AfterLoad, Cast, Gen, Input, Outcome, Phase, Playback, PlayerCommand, PlayerEvent, SenderCommand, Session,
-    TransportState, Unloaded,
+    AfterLoad, Cast, Gen, Input, Outcome, Phase, PhaseView, Playback, PlayerCommand, PlayerEvent, SenderCommand,
+    Session, TransportState, Unloaded, View,
 };

@@ -1,7 +1,7 @@
 //! End-to-end over loopback: a sender's full conversation with the receiver,
 //! speaking raw HTTP and UDP like a phone app would.
 
-use castable_net::{Command, Config, Gen, PlayerCommand, PlayerEvent};
+use castable_net::{Config, Gen, PlayerCommand, PlayerEvent};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -55,7 +55,7 @@ async fn next_event(events: &TcpListener) -> String {
     raw
 }
 
-async fn next_command(rx: &mut tokio::sync::mpsc::UnboundedReceiver<Command>) -> Command {
+async fn next_command(rx: &mut tokio::sync::mpsc::UnboundedReceiver<PlayerCommand>) -> PlayerCommand {
     tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.expect("no command").unwrap()
 }
 
@@ -102,7 +102,7 @@ async fn a_phone_casts_plays_and_gets_events() {
     assert_eq!(set.status, 200, "{}", set.body);
     assert!(set.body.contains("SetAVTransportURIResponse"));
     match next_command(&mut rx.commands).await {
-        Command::Player(PlayerCommand::Load { gen, media }) => {
+        PlayerCommand::Load { gen, media } => {
             assert_eq!(gen, Gen(1));
             assert_eq!(media.url, "http://10.0.0.9/e1.mp4");
             assert_eq!(media.mime.as_deref(), Some("video/mp4"));
@@ -114,7 +114,7 @@ async fn a_phone_casts_plays_and_gets_events() {
     // Play while loading is remembered (not error 701) and starts once loaded.
     assert_eq!(avt(addr, "Play", "<Speed>1</Speed>").await.status, 200);
     rx.handle.player_event(PlayerEvent::Loaded { gen: Gen(1), duration: Some(Duration::from_secs(1500)) });
-    assert_eq!(next_command(&mut rx.commands).await, Command::Player(PlayerCommand::Play));
+    assert_eq!(next_command(&mut rx.commands).await, PlayerCommand::Play);
     assert!(next_event(&events).await.contains("PLAYING"));
     let info = avt(addr, "GetTransportInfo", "").await;
     assert!(info.body.contains("<CurrentTransportState>PLAYING</CurrentTransportState>"), "{}", info.body);

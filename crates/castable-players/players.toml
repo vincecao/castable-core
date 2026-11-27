@@ -1,0 +1,73 @@
+# Players the Castable receiver can drive.
+#
+# Add a player with a pull request here, or for yourself in
+# ~/.config/castable/players.toml (same format; an entry with the same name
+# replaces the built-in one). Then: receiver --player <name>.
+#
+# Each player:
+#   description  one line, shown by `receiver --players`
+#   program      candidates, first one that exists wins (absolute paths are
+#                checked; a bare name is looked up on PATH when started)
+#   args         the arguments; placeholders are filled per cast:
+#                  {url}          the media URL
+#                  {title}        the title, if the sender gave one
+#                  {referer}      the Referer header the stream needs, if any
+#                  {user_agent}   the User-Agent header the stream needs, if any
+#                  {headers}      all headers as "Name: value,Name: value", if any
+#                  {ipc}          a socket path, for control = "mpv-ipc"
+#                  {port}         a free local port, for control = "vlc-http"
+#                  {password}     a random password, for control = "vlc-http"
+#                An argument whose placeholder has no value is left out; group
+#                arguments that go together as ["-flag", "{value}"] so both go.
+#   control      how the receiver talks to the running player:
+#                  "mpv-ipc"   mpv's JSON IPC socket: play, pause, seek, volume,
+#                              and real loaded / progress / end events
+#                  "vlc-http"  VLC's web remote: the same, by polling
+#                  "launch"    start and stop only; play, pause and seek do nothing
+#   platforms    optional: where it exists, any of "macos", "linux", "windows"
+#
+# A player that speaks a protocol above needs only an entry here. A new
+# protocol is a variant of `Control` in src/spec.rs and a module like src/mpv.rs.
+
+[players.mpv]
+description = "mpv: plays almost anything, full control"
+program = ["mpv"]
+args = ["--pause", "--force-window=immediate", "--keep-open=no", "--input-ipc-server={ipc}",
+        "--force-media-title={title}", "--http-header-fields={headers}", "{url}"]
+control = "mpv-ipc"
+
+[players.iina]
+description = "IINA (macOS, built on mpv), full control"
+program = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "iina"]
+args = ["--no-stdin", "--mpv-pause", "--mpv-input-ipc-server={ipc}",
+        "--mpv-force-media-title={title}", "--mpv-http-header-fields={headers}", "{url}"]
+control = "mpv-ipc"
+platforms = ["macos"]
+
+[players.vlc]
+description = "VLC, full control through its web remote"
+program = ["/Applications/VLC.app/Contents/MacOS/VLC", "vlc"]
+args = ["--extraintf=http", "--http-host=127.0.0.1", "--http-port={port}", "--http-password={password}",
+        "--start-paused", "--play-and-exit", "--no-video-title-show",
+        "--meta-title={title}", "--http-referrer={referer}", "--http-user-agent={user_agent}", "{url}"]
+control = "vlc-http"
+
+[players.quicktime]
+description = "QuickTime Player (macOS), launch only"
+program = ["open"]
+args = ["-a", "QuickTime Player", "{url}"]
+control = "launch"
+platforms = ["macos"]
+
+[players.ffplay]
+description = "ffplay (comes with ffmpeg), launch only"
+program = ["ffplay"]
+args = ["-autoexit", ["-window_title", "{title}"], "{url}"]
+control = "launch"
+
+[players.browser]
+description = "the default web browser, launch only"
+program = ["open", "xdg-open"]
+args = ["{url}"]
+control = "launch"
+platforms = ["macos", "linux"]

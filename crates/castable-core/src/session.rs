@@ -225,6 +225,13 @@ pub enum PlayerCommand {
         #[serde(rename = "toSecs", with = "crate::time::secs")]
         to: Duration,
     },
+    /// Volume 0..=100 (RenderingControl).
+    SetVolume {
+        volume: u8,
+    },
+    SetMuted {
+        muted: bool,
+    },
 }
 
 /// The result of one input.
@@ -258,10 +265,7 @@ impl Session {
     }
 
     pub fn cast(&self) -> Option<&Cast> {
-        match &self.phase {
-            Phase::Idle => None,
-            Phase::Loading { cast, .. } | Phase::Loaded { cast, .. } | Phase::Unloaded { cast, .. } => Some(cast),
-        }
+        self.phase.cast()
     }
 
     pub fn transport_state(&self) -> TransportState {
@@ -308,116 +312,100 @@ impl Session {
 
     pub fn handle(&mut self, input: Input) -> Result<Outcome, UpnpError> {
         let before = (self.transport_state(), self.cast().map(|c| c.gen));
-        let commands = match input {
-            Input::Sender(cmd) => self.on_sender(cmd)?,
-            Input::Player(ev) => self.on_player(ev),
+        let phase = std::mem::replace(&mut self.phase, Phase::Idle);
+        let (phase, result) = match input {
+            Input::Sender(cmd) => phase.on_sender(cmd, &mut self.last_gen),
+            Input::Player(ev) => {
+                let (phase, commands) = phase.on_player(ev);
+                (phase, Ok(commands))
+            }
         };
+        // A refusal hands the phase back unchanged, so there is nothing to restore.
+        self.phase = phase;
+        let commands = result?;
         let after = (self.transport_state(), self.cast().map(|c| c.gen));
         Ok(Outcome { commands, changed: before != after })
     }
+}
 
-    fn new_gen(&mut self) -> Gen {
-        self.last_gen += 1;
-        Gen(self.last_gen)
-    }
-
+/// The transitions: pure functions from a phase and an input to the next
+/// phase and what the player must do.
+impl Phase {
     /// Starts loading `media` as a new generation.
-    fn load(&mut self, media: MediaDescriptor, then: AfterLoad) -> Vec<PlayerCommand> {
-        let gen = self.new_gen();
+    fn load(media: MediaDescriptor, then: AfterLoad, last_gen: &mut u64) -> (Phase, Vec<PlayerCommand>) {
+        *last_gen += 1;
+        let gen = Gen(*last_gen);
         let cast = Cast { gen, media: media.clone(), position: Duration::ZERO, duration: None };
-        self.phase = Phase::Loading { cast, then };
-        vec![PlayerCommand::Load { gen, media }]
+        (Phase::Loading { cast, then }, vec![PlayerCommand::Load { gen, media }])
     }
 
-    fn on_sender(&mut self, cmd: SenderCommand) -> Result<Vec<PlayerCommand>, UpnpError> {
+    fn on_sender(self, cmd: SenderCommand, last_gen: &mut u64) -> (Phase, Result<Vec<PlayerCommand>, UpnpError>) {
         use PlayerCommand as P;
         use SenderCommand as S;
-        let phase = std::mem::replace(&mut self.phase, Phase::Idle);
-        let (phase, commands) = match (phase, cmd) {
+        let ok = |(phase, commands): (Phase, Vec<PlayerCommand>)| (phase, Ok(commands));
+        let refuse = |phase: Phase| (phase, Err(UpnpError::TransitionNotAvailable));
+        match (self, cmd) {
             // A new cast always replaces the old one, whatever the state.
-            (_, S::SetUri(media)) => return Ok(self.load(media, AfterLoad::Hold)),
+            (_, S::SetUri(media)) => ok(Phase::load(media, AfterLoad::Hold, last_gen)),
+            (Phase::Idle, _) => refuse(Phase::Idle),
 
-            (Phase::Idle, _) => {
-                self.phase = Phase::Idle;
-                return Err(UpnpError::TransitionNotAvailable);
+            // Play: during loading it is remembered; after a failure it retries.
+            (Phase::Loading { cast, .. }, S::Play) => ok((Phase::Loading { cast, then: AfterLoad::Play }, vec![])),
+            (Phase::Loaded { cast, playback }, S::Play) => {
+                let commands = if playback == Playback::Playing { vec![] } else { vec![P::Play] };
+                ok((Phase::Loaded { cast, playback: Playback::Playing }, commands))
             }
-
-            // Play
-            (Phase::Loading { cast, .. }, S::Play) => (Phase::Loading { cast, then: AfterLoad::Play }, vec![]),
-            (Phase::Loaded { cast, playback: Playback::Playing }, S::Play) => {
-                (Phase::Loaded { cast, playback: Playback::Playing }, vec![])
-            }
-            (Phase::Loaded { cast, .. }, S::Play) => {
-                (Phase::Loaded { cast, playback: Playback::Playing }, vec![P::Play])
-            }
-            (Phase::Unloaded { cast, .. }, S::Play) => return Ok(self.load(cast.media, AfterLoad::Play)),
+            (Phase::Unloaded { cast, .. }, S::Play) => ok(Phase::load(cast.media, AfterLoad::Play, last_gen)),
 
             // Pause
-            (Phase::Loading { cast, .. }, S::Pause) => (Phase::Loading { cast, then: AfterLoad::Hold }, vec![]),
+            (Phase::Loading { cast, .. }, S::Pause) => ok((Phase::Loading { cast, then: AfterLoad::Hold }, vec![])),
             (Phase::Loaded { cast, playback: Playback::Playing }, S::Pause) => {
-                (Phase::Loaded { cast, playback: Playback::Paused }, vec![P::Pause])
+                ok((Phase::Loaded { cast, playback: Playback::Paused }, vec![P::Pause]))
             }
-            (Phase::Loaded { cast, playback: Playback::Paused }, S::Pause) => {
-                (Phase::Loaded { cast, playback: Playback::Paused }, vec![])
-            }
-            (phase @ (Phase::Loaded { .. } | Phase::Unloaded { .. }), S::Pause) => {
-                self.phase = phase;
-                return Err(UpnpError::TransitionNotAvailable);
-            }
+            (phase @ Phase::Loaded { playback: Playback::Paused, .. }, S::Pause) => ok((phase, vec![])),
+            (phase @ (Phase::Loaded { .. } | Phase::Unloaded { .. }), S::Pause) => refuse(phase),
 
-            // Stop
+            // Stop: cancels a load; rewinds loaded media.
             (Phase::Loading { cast, .. }, S::Stop) => {
-                (Phase::Unloaded { cast, why: Unloaded::StoppedWhileLoading }, vec![P::Stop])
+                ok((Phase::Unloaded { cast, why: Unloaded::StoppedWhileLoading }, vec![P::Stop]))
             }
             (Phase::Loaded { mut cast, playback }, S::Stop) => {
                 cast.position = Duration::ZERO;
-                let cmds = if playback == Playback::Stopped { vec![] } else { vec![P::Stop] };
-                (Phase::Loaded { cast, playback: Playback::Stopped }, cmds)
+                let commands = if playback == Playback::Stopped { vec![] } else { vec![P::Stop] };
+                ok((Phase::Loaded { cast, playback: Playback::Stopped }, commands))
             }
-            (phase @ Phase::Unloaded { .. }, S::Stop) => (phase, vec![]),
+            (phase @ Phase::Unloaded { .. }, S::Stop) => ok((phase, vec![])),
 
-            // Seek
+            // Seek: live media can't seek. Many senders seek right after casting,
+            // while it still loads: remember where to start, like a Play.
+            (phase @ (Phase::Loading { .. } | Phase::Loaded { .. }), S::Seek { .. })
+                if phase.cast().is_some_and(|c| c.media.is_live()) =>
+            {
+                (phase, Err(UpnpError::SeekModeNotSupported))
+            }
+            (phase @ Phase::Loaded { .. }, S::Seek { to })
+                if phase.cast().and_then(|c| c.duration).is_some_and(|d| to > d) =>
+            {
+                (phase, Err(UpnpError::IllegalSeekTarget))
+            }
             (Phase::Loaded { mut cast, playback }, S::Seek { to }) => {
-                let error = if cast.media.is_live() {
-                    Some(UpnpError::SeekModeNotSupported)
-                } else if cast.duration.is_some_and(|d| to > d) {
-                    Some(UpnpError::IllegalSeekTarget)
-                } else {
-                    None
-                };
-                if let Some(e) = error {
-                    self.phase = Phase::Loaded { cast, playback };
-                    return Err(e);
-                }
                 cast.position = to;
-                (Phase::Loaded { cast, playback }, vec![P::Seek { to }])
+                ok((Phase::Loaded { cast, playback }, vec![P::Seek { to }]))
             }
-            // Many senders seek right after casting, while it still loads:
-            // remember where to start, like a Play during loading.
             (Phase::Loading { mut cast, then }, S::Seek { to }) => {
-                if cast.media.is_live() {
-                    self.phase = Phase::Loading { cast, then };
-                    return Err(UpnpError::SeekModeNotSupported);
-                }
                 cast.position = to;
-                (Phase::Loading { cast, then }, vec![])
+                ok((Phase::Loading { cast, then }, vec![]))
             }
-            (phase @ Phase::Unloaded { .. }, S::Seek { .. }) => {
-                self.phase = phase;
-                return Err(UpnpError::TransitionNotAvailable);
-            }
-        };
-        self.phase = phase;
-        Ok(commands)
+            (phase @ Phase::Unloaded { .. }, S::Seek { .. }) => refuse(phase),
+        }
     }
 
-    fn on_player(&mut self, ev: PlayerEvent) -> Vec<PlayerCommand> {
+    fn on_player(self, ev: PlayerEvent) -> (Phase, Vec<PlayerCommand>) {
         // Events from an older load are dropped here, in one place.
         if self.cast().map(|c| c.gen) != Some(ev.gen()) {
-            return vec![];
+            return (self, vec![]);
         }
-        let phase = std::mem::replace(&mut self.phase, Phase::Idle);
-        let (phase, commands) = match (phase, ev) {
+        match (self, ev) {
             (Phase::Loading { mut cast, then }, PlayerEvent::Loaded { duration, .. }) => {
                 cast.duration = duration;
                 if duration.is_some_and(|d| cast.position > d) {
@@ -445,9 +433,7 @@ impl Session {
             }
             (Phase::Loaded { mut cast, playback }, PlayerEvent::Progress { position, duration, .. }) => {
                 cast.position = position;
-                if duration.is_some() {
-                    cast.duration = duration;
-                }
+                cast.duration = duration.or(cast.duration);
                 (Phase::Loaded { cast, playback }, vec![])
             }
             (Phase::Loaded { mut cast, playback: Playback::Playing }, PlayerEvent::Ended { .. }) => {
@@ -456,8 +442,13 @@ impl Session {
             }
             // Anything else (a duplicate event, a late progress tick) changes nothing.
             (phase, _) => (phase, vec![]),
-        };
-        self.phase = phase;
-        commands
+        }
+    }
+
+    pub fn cast(&self) -> Option<&Cast> {
+        match self {
+            Phase::Idle => None,
+            Phase::Loading { cast, .. } | Phase::Loaded { cast, .. } | Phase::Unloaded { cast, .. } => Some(cast),
+        }
     }
 }

@@ -159,14 +159,6 @@ impl Subscriptions {
             })
             .collect()
     }
-
-    pub fn len(&self) -> usize {
-        self.by_sid.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.by_sid.is_empty()
-    }
 }
 
 #[cfg(test)]

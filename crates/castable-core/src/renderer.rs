@@ -114,21 +114,21 @@ impl Action {
     }
 }
 
-/// Everything the platform must do after an input.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Command {
-    Player(PlayerCommand),
-    SetVolume(u8),
-    SetMuted(bool),
-}
-
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Reply {
     /// Output arguments of the SOAP response, in SCPD order.
     pub out: Vec<(&'static str, String)>,
-    pub commands: Vec<Command>,
+    pub commands: Vec<PlayerCommand>,
     /// Services whose evented state changed (send a LastChange to subscribers).
     pub notify: Vec<Service>,
+}
+
+/// The current track's fields as UPnP writes them.
+struct Track {
+    uri: String,
+    duration: String,
+    position: String,
+    count: &'static str,
 }
 
 #[derive(Debug, Clone)]
@@ -177,8 +177,12 @@ impl Renderer {
             A::Pause => sender(self, SenderCommand::Pause)?,
             A::Stop => sender(self, SenderCommand::Stop)?,
             A::Seek(to) => sender(self, SenderCommand::Seek { to })?,
-            A::SetVolume(v) => self.mixer(Command::SetVolume(v), v != self.volume, |r| r.volume = v),
-            A::SetMute(m) => self.mixer(Command::SetMuted(m), m != self.muted, |r| r.muted = m),
+            A::SetVolume(volume) => {
+                self.mixer(PlayerCommand::SetVolume { volume }, volume != self.volume, |r| r.volume = volume)
+            }
+            A::SetMute(muted) => {
+                self.mixer(PlayerCommand::SetMuted { muted }, muted != self.muted, |r| r.muted = muted)
+            }
             query => Reply { out: self.query(&query), ..Reply::default() },
         })
     }
@@ -192,12 +196,12 @@ impl Renderer {
         let outcome = self.session.handle(input)?;
         Ok(Reply {
             out: vec![],
-            commands: outcome.commands.into_iter().map(Command::Player).collect(),
+            commands: outcome.commands,
             notify: if outcome.changed { vec![Service::AvTransport] } else { vec![] },
         })
     }
 
-    fn mixer(&mut self, cmd: Command, changed: bool, apply: impl FnOnce(&mut Self)) -> Reply {
+    fn mixer(&mut self, cmd: PlayerCommand, changed: bool, apply: impl FnOnce(&mut Self)) -> Reply {
         apply(self);
         Reply {
             out: vec![],
@@ -206,13 +210,22 @@ impl Renderer {
         }
     }
 
+    /// The current track as UPnP strings, shared by queries and events.
+    fn track(&self) -> Track {
+        let cast = self.session.cast();
+        let hms = |d: Option<std::time::Duration>| d.map_or_else(|| "0:00:00".to_string(), format_hms);
+        Track {
+            uri: cast.map(|c| c.media.url.clone()).unwrap_or_default(),
+            duration: hms(cast.and_then(|c| c.duration)),
+            position: hms(cast.map(|c| c.position)),
+            count: if cast.is_some() { "1" } else { "0" },
+        }
+    }
+
     fn query(&self, action: &Action) -> Vec<(&'static str, String)> {
         use Action as A;
         let s = &self.session;
-        let cast = s.cast();
-        let uri = cast.map(|c| c.media.url.clone()).unwrap_or_default();
-        let duration = cast.and_then(|c| c.duration).map(format_hms).unwrap_or_else(|| "0:00:00".into());
-        let position = cast.map(|c| format_hms(c.position)).unwrap_or_else(|| "0:00:00".into());
+        let Track { uri, duration, position, count } = self.track();
         let o = |pairs: &[(&'static str, &str)]| pairs.iter().map(|(k, v)| (*k, v.to_string())).collect();
         match action {
             A::GetTransportInfo => o(&[
@@ -221,7 +234,7 @@ impl Renderer {
                 ("CurrentSpeed", "1"),
             ]),
             A::GetPositionInfo => o(&[
-                ("Track", if cast.is_some() { "1" } else { "0" }),
+                ("Track", count),
                 ("TrackDuration", &duration),
                 ("TrackMetaData", &self.metadata),
                 ("TrackURI", &uri),
@@ -231,7 +244,7 @@ impl Renderer {
                 ("AbsCount", "2147483647"),
             ]),
             A::GetMediaInfo => o(&[
-                ("NrTracks", if cast.is_some() { "1" } else { "0" }),
+                ("NrTracks", count),
                 ("MediaDuration", &duration),
                 ("CurrentURI", &uri),
                 ("CurrentURIMetaData", &self.metadata),
@@ -280,17 +293,14 @@ impl Renderer {
         let vars: Vec<(&str, String)> = match service {
             Service::AvTransport => {
                 let s = &self.session;
-                let cast = s.cast();
+                let Track { uri, duration, .. } = self.track();
                 vec![
                     ("TransportState", s.transport_state().as_str().into()),
                     ("TransportStatus", s.transport_status().into()),
                     ("CurrentTransportActions", self.available_actions()),
-                    ("AVTransportURI", cast.map(|c| c.media.url.clone()).unwrap_or_default()),
-                    ("CurrentTrackURI", cast.map(|c| c.media.url.clone()).unwrap_or_default()),
-                    (
-                        "CurrentTrackDuration",
-                        cast.and_then(|c| c.duration).map(format_hms).unwrap_or_else(|| "0:00:00".into()),
-                    ),
+                    ("AVTransportURI", uri.clone()),
+                    ("CurrentTrackURI", uri),
+                    ("CurrentTrackDuration", duration),
                 ]
             }
             Service::RenderingControl => {
@@ -330,11 +340,11 @@ mod tests {
         let mut r = Renderer::new();
         let set = call(Service::AvTransport, "<u:SetAVTransportURI><InstanceID>0</InstanceID><CurrentURI>http://x/a.mp4</CurrentURI><CurrentURIMetaData></CurrentURIMetaData></u:SetAVTransportURI>");
         let reply = r.act(set).unwrap();
-        assert!(matches!(reply.commands[0], Command::Player(PlayerCommand::Load { gen: Gen(1), .. })));
+        assert!(matches!(reply.commands[0], PlayerCommand::Load { gen: Gen(1), .. }));
         assert_eq!(reply.notify, vec![Service::AvTransport]);
         r.act(Action::Play).unwrap();
         let reply = r.on_player(PlayerEvent::Loaded { gen: Gen(1), duration: Some(Duration::from_secs(90)) });
-        assert_eq!(reply.commands, vec![Command::Player(PlayerCommand::Play)]);
+        assert_eq!(reply.commands, vec![PlayerCommand::Play]);
         let info = r.act(Action::GetTransportInfo).unwrap().out;
         assert_eq!(info[0], ("CurrentTransportState", "PLAYING".to_string()));
         let pos = r.act(Action::GetPositionInfo).unwrap().out;
@@ -365,6 +375,38 @@ mod tests {
             call(Service::AvTransport, "<Seek><Unit>REL_TIME</Unit><Target>0:00:30</Target></Seek>"),
             Action::Seek(Duration::from_secs(30))
         );
+    }
+
+    /// The service table (what senders are told) and `Action` (what is
+    /// parsed and logged) must name the same actions.
+    #[test]
+    fn every_advertised_action_parses_to_itself() {
+        use crate::service::{ActionSpec, ArgSpec, Dir};
+        let value = |arg: &str| match arg {
+            "CurrentURI" => "http://x/a.mp4",
+            "Unit" => "REL_TIME",
+            "Target" => "0:00:01",
+            "DesiredMute" => "1",
+            "Speed" => "1",
+            _ => "0",
+        };
+        let mut count = 0;
+        for service in Service::ALL {
+            for ActionSpec(name, args) in service.actions() {
+                let call = crate::soap::RawCall {
+                    action: name.to_string(),
+                    args: args
+                        .iter()
+                        .filter(|ArgSpec(_, dir, _)| *dir == Dir::In)
+                        .map(|ArgSpec(a, _, _)| (a.to_string(), value(a).to_string()))
+                        .collect(),
+                };
+                let action = Action::parse(service, &call).unwrap_or_else(|e| panic!("{name}: {e}"));
+                assert_eq!(action.name(), *name);
+                count += 1;
+            }
+        }
+        assert_eq!(count, 18, "every Action variant is advertised exactly once");
     }
 
     #[test]

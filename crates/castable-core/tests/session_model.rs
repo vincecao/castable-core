@@ -39,6 +39,7 @@ impl FakePlayer {
                 self.loading = None;
             }
             PlayerCommand::Seek { .. } => assert!(self.shown.is_some(), "Seek sent with nothing loaded"),
+            PlayerCommand::SetVolume { .. } | PlayerCommand::SetMuted { .. } => {}
         }
     }
 

@@ -14,12 +14,20 @@
 //! # Ok(()) }
 //! ```
 
-pub mod actor;
-pub mod gena;
-pub mod http;
-pub mod ssdp;
+mod actor;
+mod gena;
+mod http;
+pub mod player;
+mod ssdp;
 
-pub use castable_core::{Command, DeviceInfo, Gen, MediaDescriptor, PlayerCommand, PlayerEvent};
+pub use castable_core::{DeviceInfo, Gen, MediaDescriptor, PlayerCommand, PlayerEvent};
+pub use player::{run, Control, Player};
+
+/// This machine's address on the network senders use (the route to the
+/// SSDP multicast group), for showing users where the receiver is.
+pub fn local_ip() -> Option<std::net::IpAddr> {
+    ssdp::local_ip_for(ssdp::MULTICAST.into())
+}
 
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
@@ -56,7 +64,7 @@ impl Config {
 /// A running receiver.
 pub struct Receiver {
     /// What the player must do, in order.
-    pub commands: mpsc::UnboundedReceiver<Command>,
+    pub commands: mpsc::UnboundedReceiver<PlayerCommand>,
     pub handle: Handle,
     pub http_addr: SocketAddr,
     pub device: DeviceInfo,
