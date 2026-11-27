@@ -1,7 +1,7 @@
 //! `castable-players`: external players for the Castable receiver.
 //!
 //! Players are data: each is an entry in `players.toml` (built in) or the
-//! user's own `~/.config/castable/players.toml`, naming a program, its
+//! user's own `players.toml` (in [`config_dir`]), naming a program, its
 //! arguments, and one of a few control protocols. Adding a player that
 //! speaks a known protocol needs no code.
 //!
@@ -17,8 +17,10 @@
 pub mod external;
 mod mpv;
 mod process;
+pub mod settings;
 pub mod spec;
 mod vlc;
 
 pub use external::External;
+pub use settings::{config_dir, settings_file, LogFormat, Settings};
 pub use spec::{user_file, Control, PlayerSpec, Registry};

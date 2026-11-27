@@ -1,8 +1,9 @@
 # Players the Castable receiver can drive.
 #
-# Add a player with a pull request here, or for yourself in
-# ~/.config/castable/players.toml (same format; an entry with the same name
-# replaces the built-in one). Then: receiver --player <name>.
+# Add a player with a pull request here, or for yourself in players.toml in
+# Castable's config folder (~/.config/castable on macOS and Linux,
+# %APPDATA%\castable on Windows; same format; an entry with the same name
+# replaces the built-in one). Then: castable-receiver --player <name>.
 #
 # Each player:
 #   description  one line, shown by `receiver --players`
@@ -31,7 +32,7 @@
 
 [players.mpv]
 description = "mpv: plays almost anything, full control"
-program = ["mpv"]
+program = ["mpv", "C:\\Program Files\\mpv\\mpv.exe"]
 args = ["--pause", "--force-window=immediate", "--keep-open=no", "--input-ipc-server={ipc}",
         "--force-media-title={title}", "--http-header-fields={headers}", "{url}"]
 control = "mpv-ipc"
@@ -46,7 +47,8 @@ platforms = ["macos"]
 
 [players.vlc]
 description = "VLC, full control through its web remote"
-program = ["/Applications/VLC.app/Contents/MacOS/VLC", "vlc"]
+program = ["/Applications/VLC.app/Contents/MacOS/VLC", "vlc",
+           "C:\\Program Files\\VideoLAN\\VLC\\vlc.exe", "C:\\Program Files (x86)\\VideoLAN\\VLC\\vlc.exe"]
 args = ["--extraintf=http", "--http-host=127.0.0.1", "--http-port={port}", "--http-password={password}",
         "--start-paused", "--play-and-exit", "--no-video-title-show",
         "--meta-title={title}", "--http-referrer={referer}", "--http-user-agent={user_agent}", "{url}"]
@@ -67,7 +69,20 @@ control = "launch"
 
 [players.browser]
 description = "the default web browser, launch only"
-program = ["open", "xdg-open"]
+program = ["open", "xdg-open", "explorer"]
 args = ["{url}"]
 control = "launch"
-platforms = ["macos", "linux"]
+
+[players.mpc-hc]
+description = "MPC-HC (Windows), launch only"
+program = ["C:\\Program Files\\MPC-HC\\mpc-hc64.exe", "mpc-hc64", "mpc-hc"]
+args = ["{url}"]
+control = "launch"
+platforms = ["windows"]
+
+[players.potplayer]
+description = "PotPlayer (Windows), launch only"
+program = ["C:\\Program Files\\DAUM\\PotPlayer\\PotPlayerMini64.exe"]
+args = ["{url}"]
+control = "launch"
+platforms = ["windows"]

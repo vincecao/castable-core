@@ -19,15 +19,33 @@ pub fn encode(ctl: &PlayerCommand) -> Vec<String> {
     }
 }
 
-/// One player's IPC conversation: sends queued controls (they wait until the
-/// socket is up, so nothing sent during start-up is lost) and turns mpv's
-/// events into PlayerEvents.
+/// Where a player's IPC endpoint lives: a Unix socket, or a named pipe on Windows.
+pub fn endpoint(session_id: &str) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(format!(r"\\.\pipe\castable-{session_id}"))
+    } else {
+        std::env::temp_dir().join(format!("castable-{session_id}.sock"))
+    }
+}
+
 #[cfg(unix)]
-pub async fn session(gen: Gen, socket: PathBuf, mut controls: UnboundedReceiver<PlayerCommand>, handle: Handle) {
+async fn connect(path: &std::path::Path) -> std::io::Result<tokio::net::UnixStream> {
+    tokio::net::UnixStream::connect(path).await
+}
+
+#[cfg(windows)]
+async fn connect(path: &std::path::Path) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeClient> {
+    tokio::net::windows::named_pipe::ClientOptions::new().open(path)
+}
+
+/// One player's IPC conversation: sends queued commands (they wait until the
+/// endpoint is up, so nothing sent during start-up is lost) and turns mpv's
+/// events into PlayerEvents.
+pub async fn session(gen: Gen, endpoint: PathBuf, mut controls: UnboundedReceiver<PlayerCommand>, handle: Handle) {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     let started = Instant::now();
     let stream = loop {
-        match tokio::net::UnixStream::connect(&socket).await {
+        match connect(&endpoint).await {
             Ok(s) => break s,
             Err(_) if started.elapsed() < Duration::from_secs(20) => {
                 tokio::time::sleep(Duration::from_millis(100)).await
@@ -38,7 +56,7 @@ pub async fn session(gen: Gen, socket: PathBuf, mut controls: UnboundedReceiver<
             }
         }
     };
-    let (read, mut write) = stream.into_split();
+    let (read, mut write) = tokio::io::split(stream);
     let mut lines = BufReader::new(read).lines();
     for watch in
         [r#"{"command":["observe_property",1,"duration"]}"#, r#"{"command":["observe_property",2,"time-pos"]}"#]
@@ -100,15 +118,6 @@ fn read_event(
         },
         _ => None,
     }
-}
-
-/// Without Unix sockets (Windows) there is no IPC here yet: assume the load
-/// worked, and drop controls.
-#[cfg(not(unix))]
-pub async fn session(gen: Gen, _socket: PathBuf, mut controls: UnboundedReceiver<PlayerCommand>, handle: Handle) {
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    castable_net::player::assume_loaded(&handle, gen);
-    while controls.recv().await.is_some() {}
 }
 
 #[cfg(test)]

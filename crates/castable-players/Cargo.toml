@@ -16,5 +16,8 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 
-[dev-dependencies]
 tracing-subscriber = { workspace = true, features = ["json"] }
+
+[[bin]]
+name = "castable-receiver"
+path = "src/bin/castable-receiver.rs"

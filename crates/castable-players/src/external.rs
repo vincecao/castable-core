@@ -49,8 +49,7 @@ impl External {
 
     fn load(&mut self, gen: Gen, media: &MediaDescriptor) {
         let mut vars = media_vars(media);
-        let session_id = format!("{}-{}", std::process::id(), gen.0);
-        let socket = std::env::temp_dir().join(format!("castable-{session_id}.sock"));
+        let socket = mpv::endpoint(&format!("{}-{}", std::process::id(), gen.0));
         let remote = vlc::Remote::new();
         match self.spec.control {
             Control::MpvIpc => {

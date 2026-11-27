@@ -1,82 +1,87 @@
 # castable-core
 
-The core of [Castable](https://github.com/vincecao/castable-universal): the logic of a DLNA cast
-receiver, with no UI. Phones with a cast button find it on the network, send it a video, and
-control playback; this repository decides what happens. The apps and screens live in
-`castable-universal`, which uses this repository as a submodule.
+The core of [Castable](https://github.com/vincecao/castable-universal): a cast receiver for your
+computer. Phones with a DLNA cast button find it on the Wi-Fi and play videos on it, in the player
+you choose. This repository holds the logic, the network layer, the player registry and the
+command-line setup; the apps and screens live in `castable-universal`.
 
-```
-crates/castable-core/  LOGIC  session state machine, DLNA/UPnP parsing. Pure Rust, no I/O.
-crates/castable-net/   I/O    SSDP discovery, HTTP/SOAP control, GENA events (tokio)
-packages/protocol/     WIRE   @castable/protocol: TypeScript mirrors of the core's JSON types
-fixtures/                     JSON written by the Rust tests, type-checked by TypeScript
-models/cast-session/          TLA+ model of the cast session
-```
+## Quick start
 
-## Design rules
-
-- **Discriminated unions everywhere.** State is one enum whose variants carry only the data valid
-  in them (`Phase`, `Delivery`, `Action`, `Command`, `PlayerCommand`, `PlayerEvent`), mirrored as
-  tagged unions in `@castable/protocol`. Invalid states can't be written down.
-- **Derive, don't store.** The UPnP transport state, the available actions and the event payloads
-  are computed from the one state value.
-- **One table per fact.** Services, their URLs, actions and state variables are defined once
-  (`service.rs`); the device description, SCPDs, SSDP and routing are generated from it.
-- **Model first.** The cast session is checked in TLA+, and the same four rules are checked against
-  the Rust code by an exhaustive test (`tests/session_model.rs`).
-- **No UI here.** The core emits a `ReceiverView` for screens to draw and `PlayerCommand`s for a
-  player to obey; it takes `PlayerEvent`s and `SenderCommand`s back.
-
-## Test it locally
-
-### 1. One-time setup (macOS)
+**macOS or Linux**
 
 ```sh
-curl https://sh.rustup.rs -sSf | sh     # Rust
-brew install node@22 mpv                 # Node 22; mpv is optional, for real playback
-corepack enable                          # pnpm
+./scripts/setup.sh
 ```
 
-### 2. Run the tests
+**Windows** (PowerShell)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
+```
+
+The script installs what's missing (Rust, Node 22, pnpm; a player if you want one), builds the
+receiver, and opens the setup wizard. The wizard is keyboard only: ↑↓ to move, Enter to choose,
+Esc to go back. It asks for:
+
+1. the name phones will show (for example "Living room")
+2. the player: installed players first, with full control (mpv, IINA, VLC) before start-only ones
+   (QuickTime, ffplay, MPC-HC, PotPlayer, the browser)
+3. the network port: automatic, 49152, or one you type
+
+Then it starts the receiver with a live status screen. Open a cast app on a phone on the same Wi-Fi
+(mconnect or TV Assist on iPhone, BubbleUPnP on Android, or any video app with a DLNA/"TV" button)
+and pick the name you chose.
+
+## Everyday use
 
 ```sh
-cargo test                       # unit, model, end-to-end and fixture tests
-pnpm install && pnpm typecheck   # the TypeScript wire types
+pnpm castable            # start (or set up, the first time)
+pnpm castable setup      # change name, player or port
+pnpm castable start      # start with the live status screen; q to stop
+pnpm castable players    # which players this computer has
 ```
 
-### 3. Cast from a real phone
+The receiver also runs on its own, with flags that override the settings file:
 
 ```sh
-cargo run -p castable-net --example receiver -- --name "My Mac" --mpv --port 49152
+target/release/castable-receiver --name "My Mac" --player mpv --port 49152
+target/release/castable-receiver --player 'open -a "QuickTime Player" {url}'   # any command
+target/release/castable-receiver --players
 ```
 
-- Allow incoming connections when macOS asks.
-- Put the phone on the same Wi-Fi and open a DLNA sender: mconnect Player or TV Assist on iPhone,
-  BubbleUPnP on Android, or any video app with a DLNA/"TV" cast button.
-- Pick "My Mac" and play a video. mpv plays it; the terminal prints each step (`▶ load`, `▶ play`).
-  Without `--mpv` the receiver only logs what it would play.
-- If an app misbehaves, run with `RUST_LOG=debug` in front and keep the output (see Logs).
+Settings live in `config.toml` in Castable's folder: `~/.config/castable` on macOS and Linux,
+`%APPDATA%\castable` on Windows.
 
-### 4. No phone? Fake one
+## Players
 
-`scripts/fake-sender.sh` sends exactly what a phone's cast button sends. In a second terminal:
+Players are data, not code. Each is an entry in
+[`crates/castable-players/players.toml`](crates/castable-players/players.toml): a program, its
+arguments with placeholders (`{url}`, `{title}`, `{referer}`...), and how to control it:
 
-```sh
-cd ~/Movies && python3 -m http.server 8000 &          # serve a video from this Mac
-IP=$(ipconfig getifaddr en0)
+| control | what works | players |
+| --- | --- | --- |
+| `mpv-ipc` | play, pause, seek, volume, real loaded / progress / end | mpv, IINA |
+| `vlc-http` | the same, through VLC's web remote | VLC |
+| `launch` | start and stop only | QuickTime, ffplay, MPC-HC, PotPlayer, browser |
 
-scripts/fake-sender.sh cast "http://$IP:8000/YOUR-VIDEO.mp4"
-scripts/fake-sender.sh play
-scripts/fake-sender.sh status        # CurrentTransportState: PLAYING
-scripts/fake-sender.sh seek 0:01:30
-scripts/fake-sender.sh pause
+**Add a player** for yourself in `players.toml` in Castable's folder, or for everyone with a pull
+request to the built-in file. A player that speaks one of the protocols above needs no code:
+
+```toml
+[players.celluloid]
+description = "Celluloid (Linux, built on mpv), full control"
+program = ["celluloid"]
+args = ["--mpv-input-ipc-server={ipc}", "--mpv-pause", "{url}"]
+control = "mpv-ipc"
+platforms = ["linux"]
 ```
 
-Set `RECEIVER=http://other-host:port` to talk to a receiver elsewhere.
+A typo is reported with the player's name when the receiver starts. A new protocol is a variant of
+`Control` in `src/spec.rs` and a module like `src/mpv.rs`.
 
-### Logs
+## Logs
 
-Every line is a message plus named fields, so it can be filtered or parsed:
+Every line is a message plus named fields:
 
 ```
 INFO control action="Seek"
@@ -90,16 +95,65 @@ INFO transport from="TRANSITIONING" to="PLAYING" gen=1
 | `debug` | also every HTTP request (peer, status, time in µs), SSDP search and status poll |
 | `trace` | also playback progress, once a second |
 
-- `RUST_LOG=debug` raises the level; `RUST_LOG=castable_net::http=debug` raises it for one part.
-- `--log-json` prints one JSON object per line, e.g. `... --log-json | jq 'select(.message=="transport")'`.
-- A level that is off costs one check and builds nothing; no line formats the media or a whole struct.
+- `RUST_LOG=debug castable-receiver`, or `RUST_LOG=castable_net::http=debug` for one part.
+- `--log json` prints one JSON object per line; the status screen reads exactly this.
+- A level that is off costs one check and builds nothing.
+
+## Test without a phone
+
+`scripts/fake-sender.sh` sends what a phone's cast button sends (macOS, Linux, or WSL/Git Bash):
+
+```sh
+cd ~/Movies && python3 -m http.server 8000 &          # serve a video from this computer
+IP=$(ipconfig getifaddr en0)                           # fish: set IP (ipconfig getifaddr en0)
+
+scripts/fake-sender.sh cast "http://$IP:8000/YOUR-VIDEO.mp4"
+scripts/fake-sender.sh play
+scripts/fake-sender.sh status        # CurrentTransportState: PLAYING
+scripts/fake-sender.sh seek 0:01:30
+```
+
+`RECEIVER=http://host:port` points it at a receiver elsewhere (default `http://localhost:49152`).
+
+## Structure
+
+```
+crates/castable-core/     LOGIC   session state machine, DLNA/UPnP parsing. Pure Rust, no I/O.
+crates/castable-net/      I/O     SSDP discovery, HTTP/SOAP control, GENA events; the Player seam
+crates/castable-players/  PLAYERS players.toml registry, control protocols, castable-receiver
+packages/protocol/        WIRE    @castable/protocol: TypeScript mirrors of the core's JSON types
+packages/cli/             CLI     @castable/cli: the setup wizard and live status (Ink)
+fixtures/                         JSON written by the Rust tests, type-checked by TypeScript
+models/cast-session/              TLA+ model of the cast session
+scripts/                          setup.sh, setup.ps1, fake-sender.sh
+```
+
+Design rules:
+
+- **Discriminated unions everywhere.** State is one enum whose variants carry only the data valid
+  in them (`Phase`, `Delivery`, `Action`, `PlayerCommand`, `PlayerEvent`, `Control`; the wizard's
+  `Step`), mirrored as tagged unions in TypeScript. Invalid states can't be written down.
+- **Pure transitions.** The session, the wizard and the status screen are reducers: input in, next
+  state out. I/O lives at the edges (`castable-net`, `castable-players`, `cli/src/system.ts`).
+- **Derive, don't store.** The UPnP transport state, the available actions and the event payloads
+  are computed from the one state value.
+- **One source per fact.** Services, URLs and state variables are defined once (`service.rs`);
+  players once (`players.toml`); OS paths once (the receiver, which the CLI asks).
+- **Model first.** The cast session is checked in TLA+, and the same rules are checked against the
+  Rust code by an exhaustive test (`tests/session_model.rs`).
 
 ## Develop
 
 ```sh
+cargo test                                      # Rust: unit, model, end-to-end, fixtures
+pnpm install && pnpm typecheck && pnpm test     # TypeScript: wire types, CLI reducers
 UPDATE_FIXTURES=1 cargo test --test fixtures    # after changing a shared type
 cargo fmt && cargo clippy --all-targets -- -D warnings
 ```
+
+Shell notes: the commands above are for bash/zsh; in fish, `VAR=value cmd` works, and
+`IP=$(...)` is `set IP (...)`. If `cargo` isn't found after installing Rust in fish, run
+`fish_add_path ~/.cargo/bin` once.
 
 ## License
 

@@ -234,8 +234,7 @@ impl Registry {
         r
     }
 
-    /// The built-in list plus the user's file, if present:
-    /// `$CASTABLE_PLAYERS`, else `~/.config/castable/players.toml`.
+    /// The built-in list plus the user's file ([`user_file`]), if present.
     pub fn load() -> Result<Registry, String> {
         let mut r = Registry::built_in();
         if let Some(path) = user_file().filter(|p| p.exists()) {
@@ -259,12 +258,11 @@ impl Registry {
     }
 }
 
+/// `$CASTABLE_PLAYERS`, else `players.toml` in Castable's config folder.
 pub fn user_file() -> Option<PathBuf> {
-    if let Some(p) = std::env::var_os("CASTABLE_PLAYERS") {
-        return Some(PathBuf::from(p));
-    }
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
-    Some(PathBuf::from(home).join(".config/castable/players.toml"))
+    std::env::var_os("CASTABLE_PLAYERS")
+        .map(PathBuf::from)
+        .or_else(|| Some(crate::settings::config_dir()?.join("players.toml")))
 }
 
 #[cfg(test)]
