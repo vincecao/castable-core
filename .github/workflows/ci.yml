@@ -57,3 +57,13 @@ jobs:
       - name: Naive design still breaks
         working-directory: models/cast-session
         run: "! java -XX:+UseParallelGC -cp ../../tla2tools.jar tlc2.TLC -config naive.cfg -workers 1 CastReceiver.tla"
+      - name: End-to-end plan holds every rule with the fixes
+        working-directory: models/system
+        run: |
+          java -XX:+UseParallelGC -cp ../../tla2tools.jar tlc2.TLC -config fixed-process.cfg -workers 1 CastSystem.tla
+          java -XX:+UseParallelGC -cp ../../tla2tools.jar tlc2.TLC -config fixed-web.cfg -workers 1 CastSystem.tla
+      - name: End-to-end plan as written still breaks
+        working-directory: models/system
+        run: |
+          ! java -XX:+UseParallelGC -cp ../../tla2tools.jar tlc2.TLC -config naive-process.cfg -workers 1 CastSystem.tla
+          ! java -XX:+UseParallelGC -cp ../../tla2tools.jar tlc2.TLC -config naive-web.cfg -workers 1 CastSystem.tla

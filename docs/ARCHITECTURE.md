@@ -275,11 +275,25 @@ UPDATE_FIXTURES=1 cargo test --test fixtures && pnpm typecheck
 | --- | --- |
 | `cargo test` | Unit tests, the session model test, loopback end-to-end (`castable-net/tests/e2e.rs`), fixtures |
 | TLC on `fixed.cfg` / `naive.cfg` | `fixed` must pass, `naive` must fail (proves the model can catch the bugs) |
+| TLC on `models/system/*.cfg` | The whole plan end to end (phone, core, screen, player, queues): `fixed-*` must pass, `naive-*` must fail |
 | `pnpm typecheck && pnpm test` | Wire types against fixtures, CLI reducers |
 | `scripts/fake-sender.sh` | Acts as a phone against a running receiver |
 | CI | All of the above on Linux, macOS and Windows |
 
-## 11. Roadmap and open decisions
+## 11. Known issues from the end-to-end model
+
+[`models/system/`](../models/system/README.md) checks the plan as a whole. It found three bugs in
+the code as written, each with a proposed fix that the model shows holds every rule:
+
+| # | Bug | Proposed fix |
+| --- | --- | --- |
+| 1 | A press on the receiver's screen can act on the next video, if a phone casts in between | Screen presses carry the `gen` they were made on; the core drops stale ones |
+| 2 | With mpv/VLC, Play after the video ends or the window closes does nothing, while the phone shows Playing | `ended` says whether the player is gone; if so the core moves to Unloaded, where Play reloads |
+| 3 | With the web player, a Play that crosses the end leaves it playing while everything says Stopped | On `ended`, the core also sends `Stop` |
+
+When a fix lands, update `models/system` (`Fixed` becomes the plan as written) and remove its row.
+
+## 12. Roadmap and open decisions
 
 - Desktop app (Tauri) wiring `castable-net` to `@castable/player-web` and `@castable/ui`.
 - iOS and Android receivers using the same core (iOS needs Apple's multicast entitlement).
@@ -293,7 +307,8 @@ This file describes the code as it is, not as it was planned. When a PR changes 
 updates the matching section here:
 
 - a crate, package or layer boundary (§2)
-- a variant of `Phase`, `PlayerCommand`, `PlayerEvent` or `SenderCommand`, or a session rule (§3)
+- a variant of `Phase`, `PlayerCommand`, `PlayerEvent` or `SenderCommand`, or a session rule (§3);
+  re-run `models/system` and update §11
 - the `Player` seam or the cast flow (§4)
 - the `players.toml` schema or a control protocol (§5)
 - config locations, CLI screens or log messages (§6, §7)
