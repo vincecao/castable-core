@@ -196,6 +196,4 @@ Shell notes: the commands above are for bash/zsh; in fish, `VAR=value cmd` works
 `fish_add_path ~/.cargo/bin` once.
 
 ## License
-
-MIT. The protocol design follows [LeanCast](https://github.com/addozhang/leancast) (Apache-2.0);
-no code is copied.
+MIT. Castable implements the public UPnP AV / DLNA specifications. Thanks to [LeanCast](https://github.com/addozhang/leancast), whose minimal receiver inspired the project; Castable contains none of its code.
