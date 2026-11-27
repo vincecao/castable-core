@@ -1,0 +1,15 @@
+{
+  "name": "@castable/protocol",
+  "version": "0.1.0",
+  "description": "The wire types between the Rust core and every UI: MediaDescriptor, ReceiverView, player commands and events. Types only, no logic.",
+  "license": "MIT",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

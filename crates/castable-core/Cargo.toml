@@ -1,0 +1,18 @@
+[package]
+name = "castable-core"
+description = "Pure protocol core of the universal cast receiver: session state machine, DLNA/UPnP parsing. No I/O."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+percent-encoding = "2"
+quick-xml = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+url = "2"
+
+[dev-dependencies]
+serde_json = { workspace = true }

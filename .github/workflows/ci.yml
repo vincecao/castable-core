@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  rust:
+    # Every OS the receiver supports, so Windows-only code (named pipes, paths) is built and tested.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+        if: matrix.os == 'ubuntu-latest'
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test --all
+
+  typescript:
+    # The wire types must accept every fixture the Rust tests write; the CLI's reducers are tested.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: The setup wizard starts from any folder
+        if: runner.os == 'Linux'
+        run: |
+          cd "$RUNNER_TEMP"
+          script -qec "stty cols 100 rows 30; timeout 8 node $GITHUB_WORKSPACE/packages/cli/bin/castable.mjs setup" /dev/null > wizard.out || true
+          # Any wizard screen counts (here it starts by building the receiver);
+          # a crash such as "React is not defined" doesn't.
+          if grep -q "Error" wizard.out || ! grep -qE "phones call|Building the receiver" wizard.out; then
+            cat wizard.out; exit 1
+          fi
+
+  model:
+    # The planned design must keep every rule; the naive design must still break.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Fetch TLC 1.7.4
+        run: |
+          curl -sSL -o tla2tools.jar https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
+          echo "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88  tla2tools.jar" | sha256sum -c
+      - name: Planned design holds every rule
+        working-directory: models/cast-session
+        run: java -XX:+UseParallelGC -cp ../../tla2tools.jar tlc2.TLC -config fixed.cfg -workers 1 CastReceiver.tla
+      - name: Naive design still breaks
+        working-directory: models/cast-session
+        run: "! java -XX:+UseParallelGC -cp ../../tla2tools.jar tlc2.TLC -config naive.cfg -workers 1 CastReceiver.tla"
+      - name: "End-to-end: the current design holds every rule"
+        working-directory: models/system
+        run: |
+          java -XX:+UseParallelGC -cp ../../tla2tools.jar tlc2.TLC -config current-process.cfg -workers 1 CastSystem.tla
+          java -XX:+UseParallelGC -cp ../../tla2tools.jar tlc2.TLC -config current-web.cfg -workers 1 CastSystem.tla
+      - name: "End-to-end: the design before the fixes still breaks"
+        working-directory: models/system
+        run: |
+          ! java -XX:+UseParallelGC -cp ../../tla2tools.jar tlc2.TLC -config before-fixes-process.cfg -workers 1 CastSystem.tla
+          ! java -XX:+UseParallelGC -cp ../../tla2tools.jar tlc2.TLC -config before-fixes-web.cfg -workers 1 CastSystem.tla

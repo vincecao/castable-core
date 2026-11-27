@@ -1,0 +1,27 @@
+[package]
+name = "castable-players"
+description = "External players for the Castable receiver: a TOML registry of players (mpv, VLC, IINA, ...) over a few control protocols."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+castable-net = { path = "../castable-net" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.9"
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+tracing-subscriber = { workspace = true, features = ["json"] }
+which = "7"
+shell-words = "1"
+strip-ansi-escapes = "0.2"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+
+[[bin]]
+name = "castable-receiver"
+path = "src/bin/castable-receiver.rs"

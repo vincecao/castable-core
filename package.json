@@ -1,0 +1,10 @@
+{
+  "name": "castable-core",
+  "private": true,
+  "packageManager": "pnpm@10.28.0",
+  "scripts": {
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r --if-present test",
+    "castable": "node packages/cli/bin/castable.mjs"
+  }
+}

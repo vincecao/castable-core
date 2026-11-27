@@ -1,0 +1,19 @@
+[package]
+name = "castable-net"
+description = "Network layer of the universal cast receiver: SSDP discovery, HTTP/SOAP control, GENA events."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+castable-core = { workspace = true }
+tokio = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+http-body-util = { workspace = true }
+bytes = { workspace = true }
+socket2 = { workspace = true, features = ["all"] }
+uuid = { workspace = true }
+tracing = { workspace = true }
