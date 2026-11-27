@@ -1,0 +1,5 @@
+# The same line endings on every OS: generated fixtures, scripts and specs
+# compare byte for byte, and sh scripts must not get \r\n.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.bundle binary

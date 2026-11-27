@@ -122,7 +122,8 @@ fn check(files: &[(PathBuf, String)]) {
         if std::env::var_os("UPDATE_FIXTURES").is_some() {
             std::fs::write(path, content).unwrap();
         }
-        let on_disk = std::fs::read_to_string(path).unwrap_or_default();
+        // A Windows checkout may turn \n into \r\n; the content is what matters.
+        let on_disk = std::fs::read_to_string(path).unwrap_or_default().replace("\r\n", "\n");
         assert_eq!(&on_disk, content, "{} is out of date; run UPDATE_FIXTURES=1 cargo test", path.display());
     }
 }
