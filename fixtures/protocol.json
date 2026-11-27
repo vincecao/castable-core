@@ -1,0 +1,77 @@
+{
+  "commands": [
+    {
+      "gen": 1,
+      "media": {
+        "delivery": {
+          "type": "onDemand"
+        },
+        "kind": "video",
+        "url": "http://10.0.0.5/e1.mp4"
+      },
+      "type": "load"
+    },
+    {
+      "type": "play"
+    },
+    {
+      "type": "pause"
+    },
+    {
+      "type": "stop"
+    },
+    {
+      "toSecs": 30.5,
+      "type": "seek"
+    }
+  ],
+  "events": [
+    {
+      "durationSecs": 90.0,
+      "gen": 1,
+      "type": "loaded"
+    },
+    {
+      "gen": 2,
+      "type": "loaded"
+    },
+    {
+      "gen": 1,
+      "reason": "404",
+      "type": "loadFailed"
+    },
+    {
+      "durationSecs": 90.0,
+      "gen": 1,
+      "positionSecs": 12.0,
+      "type": "progress"
+    },
+    {
+      "gen": 1,
+      "type": "ended"
+    }
+  ],
+  "sender": [
+    {
+      "delivery": {
+        "type": "onDemand"
+      },
+      "kind": "video",
+      "type": "setUri",
+      "url": "http://10.0.0.5/e1.mp4"
+    },
+    {
+      "type": "play"
+    },
+    {
+      "type": "pause"
+    },
+    {
+      "type": "stop"
+    },
+    {
+      "toSecs": 10.0,
+      "type": "seek"
+    }
+  ]
+}

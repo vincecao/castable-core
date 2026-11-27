@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test --all
+
+  protocol:
+    # The TypeScript wire types must accept every fixture the Rust tests write.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+
+  model:
+    # The planned design must keep every rule; the naive design must still break.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Fetch TLC 1.7.4
+        run: |
+          curl -sSL -o tla2tools.jar https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
+          echo "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88  tla2tools.jar" | sha256sum -c
+      - name: Planned design holds every rule
+        working-directory: models/cast-session
+        run: java -XX:+UseParallelGC -cp ../../tla2tools.jar tlc2.TLC -config fixed.cfg -workers 1 CastReceiver.tla
+      - name: Naive design still breaks
+        working-directory: models/cast-session
+        run: "! java -XX:+UseParallelGC -cp ../../tla2tools.jar tlc2.TLC -config naive.cfg -workers 1 CastReceiver.tla"
