@@ -55,7 +55,7 @@ cargo run -p castable-net --example receiver -- --name "My Mac" --mpv --port 491
   BubbleUPnP on Android, or any video app with a DLNA/"TV" cast button.
 - Pick "My Mac" and play a video. mpv plays it; the terminal prints each step (`▶ load`, `▶ play`).
   Without `--mpv` the receiver only logs what it would play.
-- If an app misbehaves, run with `RUST_LOG=debug` in front and keep the output.
+- If an app misbehaves, run with `RUST_LOG=debug` in front and keep the output (see Logs).
 
 ### 4. No phone? Fake one
 
@@ -73,6 +73,26 @@ scripts/fake-sender.sh pause
 ```
 
 Set `RECEIVER=http://other-host:port` to talk to a receiver elsewhere.
+
+### Logs
+
+Every line is a message plus named fields, so it can be filtered or parsed:
+
+```
+INFO control action="Seek"
+INFO player command command="load" gen=1 url=https://… title="…" mime="video/mp4" live=false
+INFO transport from="TRANSITIONING" to="PLAYING" gen=1
+```
+
+| Level | What it shows |
+|---|---|
+| `info` (default) | casts, sender actions, player commands and events, state changes, subscriptions |
+| `debug` | also every HTTP request (peer, status, time in µs), SSDP search and status poll |
+| `trace` | also playback progress, once a second |
+
+- `RUST_LOG=debug` raises the level; `RUST_LOG=castable_net::http=debug` raises it for one part.
+- `--log-json` prints one JSON object per line, e.g. `... --log-json | jq 'select(.message=="transport")'`.
+- A level that is off costs one check and builds nothing; no line formats the media or a whole struct.
 
 ## Develop
 

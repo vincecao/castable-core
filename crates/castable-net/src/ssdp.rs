@@ -67,7 +67,7 @@ pub async fn run(device: DeviceInfo, http_port: u16, port: u16, mut shutdown: wa
             }
         }
     };
-    tracing::info!(location = %default_location(), "SSDP up");
+    tracing::info!(location = %default_location(), port, "ssdp up");
     announce(Announce::Alive).await;
     let mut ticker = tokio::time::interval(ANNOUNCE_EVERY);
     ticker.tick().await;
@@ -80,7 +80,7 @@ pub async fn run(device: DeviceInfo, http_port: u16, port: u16, mut shutdown: wa
                 let ip = local_ip_for(peer.ip()).unwrap_or(Ipv4Addr::LOCALHOST.into());
                 let replies = search_responses(&device, &search, &location(ip, http_port));
                 if replies.is_empty() { continue }
-                tracing::debug!(%peer, st = %search.st, "M-SEARCH");
+                tracing::debug!(peer = %peer.ip(), st = %search.st, replies = replies.len(), "ssdp search");
                 let socket = socket.clone();
                 let delay = jitter(Duration::from_secs(u64::from(search.mx)).min(Duration::from_millis(500)));
                 tokio::spawn(async move {
@@ -93,7 +93,7 @@ pub async fn run(device: DeviceInfo, http_port: u16, port: u16, mut shutdown: wa
             _ = ticker.tick() => announce(Announce::Alive).await,
             _ = shutdown.changed() => {
                 announce(Announce::ByeBye).await;
-                tracing::info!("SSDP down");
+                tracing::info!("ssdp down");
                 return;
             }
         }

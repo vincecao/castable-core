@@ -235,12 +235,32 @@ fn errors_match_upnp() {
     let mut w = World::new();
     assert_eq!(w.send(sender(SenderCommand::Play)), Err(UpnpError::TransitionNotAvailable));
     w.send(cast("http://a/1.mp4")).unwrap();
-    assert_eq!(
-        w.send(sender(SenderCommand::Seek { to: Duration::from_secs(1) })),
-        Err(UpnpError::TransitionNotAvailable)
-    );
     w.send(loaded(1)).unwrap();
     assert_eq!(w.send(sender(SenderCommand::Seek { to: Duration::from_secs(600) })), Err(UpnpError::IllegalSeekTarget));
+}
+
+#[test]
+fn a_seek_while_loading_starts_there() {
+    // A phone casts, seeks to 0:30 and presses Play before the video has loaded.
+    let mut w = replay(vec![cast("http://a/1.mp4"), sender(SenderCommand::Seek { to: Duration::from_secs(30) })]);
+    w.send(sender(SenderCommand::Play)).unwrap();
+    let before = w.player.clone();
+    w.send(loaded(1)).unwrap();
+    assert!(w.player.playing);
+    assert_ne!(before, w.player);
+    assert_eq!(w.session.cast().unwrap().position, Duration::from_secs(30));
+}
+
+#[test]
+fn a_seek_while_loading_a_live_stream_is_refused() {
+    let mut live = MediaDescriptor::video("http://a/live.m3u8");
+    live.delivery = Delivery::Live;
+    let mut w = World::new();
+    w.send(Input::Sender(SenderCommand::SetUri(live))).unwrap();
+    assert_eq!(
+        w.send(sender(SenderCommand::Seek { to: Duration::from_secs(5) })),
+        Err(UpnpError::SeekModeNotSupported)
+    );
 }
 
 // ---- Exhaustive check, like TLC but over the real code ----

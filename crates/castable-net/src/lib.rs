@@ -106,10 +106,10 @@ async fn serve(listener: TcpListener, ctx: Arc<http::Ctx>, mut shutdown: watch::
     loop {
         tokio::select! {
             accepted = listener.accept() => {
-                let Ok((stream, _)) = accepted else { continue };
+                let Ok((stream, peer)) = accepted else { continue };
                 let ctx = ctx.clone();
                 tokio::spawn(async move {
-                    let svc = service_fn(move |req| http::handle(req, ctx.clone()));
+                    let svc = service_fn(move |req| http::handle(req, ctx.clone(), peer));
                     if let Err(e) = http1::Builder::new().serve_connection(TokioIo::new(stream), svc).await {
                         tracing::debug!(error = %e, "connection ended");
                     }

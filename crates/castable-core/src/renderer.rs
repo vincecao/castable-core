@@ -38,6 +38,35 @@ pub enum Action {
 }
 
 impl Action {
+    /// The UPnP action name, for logs (no allocation).
+    pub fn name(&self) -> &'static str {
+        match self {
+            Action::SetUri { .. } => "SetAVTransportURI",
+            Action::Play => "Play",
+            Action::Pause => "Pause",
+            Action::Stop => "Stop",
+            Action::Seek(_) => "Seek",
+            Action::GetTransportInfo => "GetTransportInfo",
+            Action::GetPositionInfo => "GetPositionInfo",
+            Action::GetMediaInfo => "GetMediaInfo",
+            Action::GetTransportSettings => "GetTransportSettings",
+            Action::GetCurrentTransportActions => "GetCurrentTransportActions",
+            Action::GetDeviceCapabilities => "GetDeviceCapabilities",
+            Action::GetVolume => "GetVolume",
+            Action::SetVolume(_) => "SetVolume",
+            Action::GetMute => "GetMute",
+            Action::SetMute(_) => "SetMute",
+            Action::GetProtocolInfo => "GetProtocolInfo",
+            Action::GetCurrentConnectionIds => "GetCurrentConnectionIDs",
+            Action::GetCurrentConnectionInfo => "GetCurrentConnectionInfo",
+        }
+    }
+
+    /// Actions that only read state: logged at debug, since senders poll them.
+    pub fn is_query(&self) -> bool {
+        self.name().starts_with("Get")
+    }
+
     /// Types a raw SOAP call for `service`. Unknown actions and bad
     /// arguments become the matching UPnP error.
     pub fn parse(service: Service, call: &RawCall) -> Result<Action, UpnpError> {
@@ -238,7 +267,7 @@ impl Renderer {
     fn available_actions(&self) -> String {
         let actions: &[&str] = match self.session.phase() {
             Phase::Idle => &[],
-            Phase::Loading { .. } => &["Play", "Pause", "Stop"],
+            Phase::Loading { .. } => &["Play", "Pause", "Stop", "Seek"],
             Phase::Loaded { playback: Playback::Playing, .. } => &["Pause", "Stop", "Seek"],
             Phase::Loaded { .. } => &["Play", "Stop", "Seek"],
             Phase::Unloaded { .. } => &["Play", "Stop"],

@@ -2,7 +2,7 @@
 //! it through [`Msg`], so there are no locks and every change is ordered.
 
 use crate::gena::{Delivery, SubscribeRequest, Subscriptions};
-use castable_core::{Action, Command, PlayerEvent, Renderer, Reply, Service, UpnpError};
+use castable_core::{Action, Command, PlayerCommand, PlayerEvent, Renderer, Reply, Service, TransportState, UpnpError};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -22,6 +22,8 @@ pub enum Msg {
 
 pub struct Actor {
     renderer: Renderer,
+    /// The last transport state logged, so each change is logged once.
+    logged_state: TransportState,
     subs: Subscriptions,
     commands: mpsc::UnboundedSender<Command>,
     notifier: mpsc::UnboundedSender<Delivery>,
@@ -32,7 +34,13 @@ impl Actor {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let (notifier, notify_rx) = mpsc::unbounded_channel();
         tokio::spawn(deliver_all(notify_rx));
-        let mut actor = Actor { renderer: Renderer::new(), subs: Subscriptions::default(), commands, notifier };
+        let mut actor = Actor {
+            renderer: Renderer::new(),
+            logged_state: TransportState::NoMediaPresent,
+            subs: Subscriptions::default(),
+            commands,
+            notifier,
+        };
         tokio::spawn(async move {
             while let Some(msg) = rx.recv().await {
                 actor.handle(msg);
@@ -44,25 +52,49 @@ impl Actor {
     fn handle(&mut self, msg: Msg) {
         match msg {
             Msg::Act { action, reply } => {
-                tracing::debug!(?action, "action");
+                let name = action.name();
+                if action.is_query() {
+                    tracing::debug!(action = name, "control");
+                } else {
+                    tracing::info!(action = name, "control");
+                }
                 let result = self.renderer.act(action).map(|r| self.apply(r));
+                if let Err(e) = &result {
+                    tracing::info!(action = name, code = e.code(), error = %e, "control refused");
+                }
                 let _ = reply.send(result);
             }
             Msg::Player(event) => {
-                tracing::debug!(?event, "player event");
+                let (kind, gen) = (event.kind(), event.gen().0);
+                if matches!(event, PlayerEvent::Progress { .. }) {
+                    tracing::trace!(event = kind, gen, "player event");
+                } else if let PlayerEvent::LoadFailed { reason, .. } = &event {
+                    tracing::warn!(event = kind, gen, reason = %reason, "player event");
+                } else {
+                    tracing::info!(event = kind, gen, "player event");
+                }
                 let reply = self.renderer.on_player(event);
                 self.apply(reply);
             }
             Msg::Subscribe { service, req, reply } => {
+                let renew = matches!(req, SubscribeRequest::Renew { .. });
                 let granted = self.subs.subscribe(service, req, Instant::now());
-                if let Some((sid, _)) = &granted {
-                    // The initial event, with the full state, goes to the new subscriber only.
-                    self.notify(service, Some(sid));
+                match &granted {
+                    Some((sid, timeout)) => {
+                        tracing::info!(service = service.id(), sid = %sid, renew, timeout_s = timeout.as_secs(), "subscribed");
+                        if !renew {
+                            // The initial event, with the full state, goes to the new subscriber only.
+                            self.notify(service, Some(sid));
+                        }
+                    }
+                    None => tracing::info!(service = service.id(), renew, "subscription refused"),
                 }
                 let _ = reply.send(granted);
             }
             Msg::Unsubscribe { sid, reply } => {
-                let _ = reply.send(self.subs.unsubscribe(&sid));
+                let removed = self.subs.unsubscribe(&sid);
+                tracing::info!(sid = %sid, removed, "unsubscribed");
+                let _ = reply.send(removed);
             }
         }
     }
@@ -71,8 +103,14 @@ impl Actor {
     /// the SOAP output arguments.
     fn apply(&mut self, reply: Reply) -> Out {
         for c in reply.commands {
-            tracing::info!(command = ?c, "player command");
+            log_command(&c);
             let _ = self.commands.send(c);
+        }
+        let state = self.renderer.session().transport_state();
+        if state != self.logged_state {
+            let gen = self.renderer.session().cast().map(|c| c.gen.0);
+            tracing::info!(from = self.logged_state.as_str(), to = state.as_str(), gen, "transport");
+            self.logged_state = state;
         }
         for service in reply.notify {
             self.notify(service, None);
@@ -88,6 +126,29 @@ impl Actor {
     }
 }
 
+/// One line per command, as named fields (no Debug dump of the media).
+fn log_command(c: &Command) {
+    match c {
+        Command::Player(PlayerCommand::Load { gen, media }) => tracing::info!(
+            command = "load",
+            gen = gen.0,
+            url = %media.url,
+            title = media.title.as_deref().unwrap_or(""),
+            mime = media.mime.as_deref().unwrap_or(""),
+            live = media.is_live(),
+            "player command"
+        ),
+        Command::Player(PlayerCommand::Seek { to }) => {
+            tracing::info!(command = "seek", to_s = to.as_secs_f64(), "player command")
+        }
+        Command::Player(PlayerCommand::Play) => tracing::info!(command = "play", "player command"),
+        Command::Player(PlayerCommand::Pause) => tracing::info!(command = "pause", "player command"),
+        Command::Player(PlayerCommand::Stop) => tracing::info!(command = "stop", "player command"),
+        Command::SetVolume(v) => tracing::info!(command = "volume", volume = v, "player command"),
+        Command::SetMuted(m) => tracing::info!(command = "mute", muted = m, "player command"),
+    }
+}
+
 /// Sends NOTIFYs one at a time, so each subscriber sees events in order.
 async fn deliver_all(mut rx: mpsc::UnboundedReceiver<Delivery>) {
     while let Some(d) = rx.recv().await {
@@ -95,7 +156,7 @@ async fn deliver_all(mut rx: mpsc::UnboundedReceiver<Delivery>) {
             .await
             .unwrap_or_else(|_| Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out")))
         {
-            tracing::warn!(sid = %d.sid, error = %e, "event delivery failed");
+            tracing::warn!(sid = %d.sid, seq = d.seq, host = %d.callback.host, error = %e, "event delivery failed");
         }
     }
 }

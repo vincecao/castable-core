@@ -182,7 +182,17 @@ pub enum PlayerEvent {
 }
 
 impl PlayerEvent {
-    fn gen(&self) -> Gen {
+    /// Short name for logs.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            PlayerEvent::Loaded { .. } => "loaded",
+            PlayerEvent::LoadFailed { .. } => "load_failed",
+            PlayerEvent::Progress { .. } => "progress",
+            PlayerEvent::Ended { .. } => "ended",
+        }
+    }
+
+    pub fn gen(&self) -> Gen {
         match self {
             PlayerEvent::Loaded { gen, .. }
             | PlayerEvent::LoadFailed { gen, .. }
@@ -382,7 +392,17 @@ impl Session {
                 cast.position = to;
                 (Phase::Loaded { cast, playback }, vec![P::Seek { to }])
             }
-            (phase @ (Phase::Loading { .. } | Phase::Unloaded { .. }), S::Seek { .. }) => {
+            // Many senders seek right after casting, while it still loads:
+            // remember where to start, like a Play during loading.
+            (Phase::Loading { mut cast, then }, S::Seek { to }) => {
+                if cast.media.is_live() {
+                    self.phase = Phase::Loading { cast, then };
+                    return Err(UpnpError::SeekModeNotSupported);
+                }
+                cast.position = to;
+                (Phase::Loading { cast, then }, vec![])
+            }
+            (phase @ Phase::Unloaded { .. }, S::Seek { .. }) => {
                 self.phase = phase;
                 return Err(UpnpError::TransitionNotAvailable);
             }
@@ -400,10 +420,21 @@ impl Session {
         let (phase, commands) = match (phase, ev) {
             (Phase::Loading { mut cast, then }, PlayerEvent::Loaded { duration, .. }) => {
                 cast.duration = duration;
-                match then {
-                    AfterLoad::Play => (Phase::Loaded { cast, playback: Playback::Playing }, vec![PlayerCommand::Play]),
-                    AfterLoad::Hold => (Phase::Loaded { cast, playback: Playback::Stopped }, vec![]),
+                if duration.is_some_and(|d| cast.position > d) {
+                    cast.position = Duration::ZERO; // a seek past the end: start at the start
                 }
+                let mut commands = Vec::new();
+                if cast.position > Duration::ZERO {
+                    commands.push(PlayerCommand::Seek { to: cast.position });
+                }
+                let playback = match then {
+                    AfterLoad::Play => {
+                        commands.push(PlayerCommand::Play);
+                        Playback::Playing
+                    }
+                    AfterLoad::Hold => Playback::Stopped,
+                };
+                (Phase::Loaded { cast, playback }, commands)
             }
             (Phase::Loading { cast, .. }, PlayerEvent::LoadFailed { reason, .. }) => {
                 (Phase::Unloaded { cast, why: Unloaded::LoadFailed(reason) }, vec![])

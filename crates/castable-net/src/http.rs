@@ -46,10 +46,15 @@ fn route(method: &Method, path: &str) -> Route {
     }
 }
 
-pub async fn handle(req: Request<Incoming>, ctx: Arc<Ctx>) -> Result<Resp, std::convert::Infallible> {
+pub async fn handle(
+    req: Request<Incoming>,
+    ctx: Arc<Ctx>,
+    peer: std::net::SocketAddr,
+) -> Result<Resp, std::convert::Infallible> {
+    let started = std::time::Instant::now();
     let path = req.uri().path().to_string();
-    tracing::debug!(method = %req.method(), %path, "http");
-    let resp = match route(req.method(), &path) {
+    let method = req.method().clone();
+    let resp = match route(&method, &path) {
         Route::Description => xml(StatusCode::OK, ctx.device.description_xml()),
         Route::Scpd(service) => xml(StatusCode::OK, service.scpd()),
         Route::Control(service) => control(service, req, &ctx).await,
@@ -57,6 +62,14 @@ pub async fn handle(req: Request<Incoming>, ctx: Arc<Ctx>) -> Result<Resp, std::
         Route::Unsubscribe => unsubscribe(&req, &ctx).await,
         Route::NotFound => empty(StatusCode::NOT_FOUND),
     };
+    tracing::debug!(
+        peer = %peer.ip(),
+        method = %method,
+        path = %path,
+        status = resp.status().as_u16(),
+        elapsed_us = started.elapsed().as_micros() as u64,
+        "http"
+    );
     Ok(with_server(resp, &ctx.device))
 }
 
@@ -67,7 +80,9 @@ async fn control(service: Service, req: Request<Incoming>, ctx: &Ctx) -> Resp {
     };
     let result = async {
         let call = soap::parse_request(&body)?;
-        let action = Action::parse(service, &call)?;
+        let action = Action::parse(service, &call).inspect_err(|e| {
+            tracing::info!(service = service.id(), action = %call.action, code = e.code(), error = %e, "control refused")
+        })?;
         let (reply, rx) = oneshot::channel();
         ctx.actor.send(Msg::Act { action, reply }).map_err(|_| UpnpError::ActionFailed)?;
         let out = rx.await.map_err(|_| UpnpError::ActionFailed)??;
@@ -76,10 +91,7 @@ async fn control(service: Service, req: Request<Incoming>, ctx: &Ctx) -> Resp {
     .await;
     match result {
         Ok(xml_body) => with_ext(xml(StatusCode::OK, xml_body)),
-        Err(e) => {
-            tracing::info!(error = %e, code = e.code(), "action refused");
-            xml(StatusCode::INTERNAL_SERVER_ERROR, soap::fault(&e))
-        }
+        Err(e) => xml(StatusCode::INTERNAL_SERVER_ERROR, soap::fault(&e)),
     }
 }
 
