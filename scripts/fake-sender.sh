@@ -16,8 +16,13 @@ soap() {
   echo
 }
 
+# XML-escapes a value (a URL's & must travel as &amp;, as a real phone sends it).
+xml_escape() {
+  printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'
+}
+
 case "${1:-}" in
-  cast) soap SetAVTransportURI "<CurrentURI>${2:?video URL}</CurrentURI><CurrentURIMetaData></CurrentURIMetaData>" ;;
+  cast) soap SetAVTransportURI "<CurrentURI>$(xml_escape "${2:?video URL}")</CurrentURI><CurrentURIMetaData></CurrentURIMetaData>" ;;
   play) soap Play "<Speed>1</Speed>" ;;
   pause) soap Pause "" ;;
   stop) soap Stop "" ;;

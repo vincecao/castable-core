@@ -6,6 +6,7 @@
 //! player = "mpv"      # a name from players.toml, a command line, or "log"
 //! port = 49152        # 0 picks a free port
 //! log = "pretty"      # or "json"
+//! font = "PingFang SC"  # on-screen text in players; "" leaves the player's own
 //! ```
 
 use serde::{Deserialize, Serialize};
@@ -26,6 +27,10 @@ pub struct Settings {
     pub player: Option<String>,
     pub port: u16,
     pub log: LogFormat,
+    /// The font players use for on-screen text and subtitles (`{font}` in
+    /// players.toml). Unset: one per OS that covers Chinese, Japanese and
+    /// Korean as well as Latin. `""`: leave the player's own choice.
+    pub font: Option<String>,
 }
 
 impl Settings {
@@ -36,6 +41,27 @@ impl Settings {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Settings::default()),
             Err(e) => Err(format!("{}: {e}", path.display())),
         }
+    }
+
+    /// The font to hand to players, if any.
+    pub fn font(&self) -> Option<String> {
+        match self.font.as_deref() {
+            Some("") => None,
+            Some(f) => Some(f.to_owned()),
+            None => Some(default_font().to_owned()),
+        }
+    }
+}
+
+/// A system font with CJK and Latin glyphs. mpv's default ("sans-serif")
+/// often has no CJK, so Chinese titles and subtitles show as boxes.
+pub fn default_font() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "PingFang SC"
+    } else if cfg!(windows) {
+        "Microsoft YaHei"
+    } else {
+        "Noto Sans CJK SC"
     }
 }
 
@@ -69,5 +95,14 @@ mod tests {
         assert_eq!((s.port, s.log), (49152, LogFormat::Json));
         assert_eq!(toml::from_str::<Settings>("").unwrap(), Settings::default());
         assert!(toml::from_str::<Settings>("colour = \"red\"").is_err(), "typos are reported");
+    }
+
+    #[test]
+    fn a_font_by_default_none_when_empty() {
+        assert_eq!(Settings::default().font().as_deref(), Some(default_font()));
+        let s: Settings = toml::from_str("font = \"Songti SC\"").unwrap();
+        assert_eq!(s.font().as_deref(), Some("Songti SC"));
+        let s: Settings = toml::from_str("font = \"\"").unwrap();
+        assert_eq!(s.font(), None);
     }
 }

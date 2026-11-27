@@ -245,13 +245,37 @@ for example `RUST_LOG=castable_net=debug`.
 | Message | Fields |
 | --- | --- |
 | `ready` | `name`, `player`, `control`, `url` |
-| `control` / `control refused` | `action` (+ `code`, `error` when refused) |
+| `control` / `control refused` | `action` (+ `code`, `error`, `category`, `upnp` when refused) |
 | `player command` | `command`, plus `gen`, `url`, `title`, `live` on load, `to_s` on seek, `volume` |
-| `player event` | `event` (`loaded`, `load_failed`, `ended`, `closed`), `gen` (+ `reason` on a failed load) |
+| `player event` | `event` (`loaded`, `load_failed`, `ended`, `closed`), `gen` (+ `code`, `error`, `category`, `detail`, `summary` on a failed load) |
+| `player says` (debug) | `output`: a line the player printed (+ `code`, `error` if it names a known error) |
 | `screen press` / `screen press refused` | `command`, `gen` (+ `code`, `error` when refused) |
 | `transport` | `from`, `to`, `gen` |
 | `subscribed` / `unsubscribed` | `service`, `sid`, `renew`, `timeout_s` |
 | HTTP request (debug) | `peer`, `method`, `path`, `status`, `elapsed_us` |
+
+**Log file and reports.** Besides the terminal (info), every run writes JSON at debug, including
+player output, to `logs/receiver.log` in the config folder, keeping the previous run as
+`receiver.1.log`. `castable-receiver --report` (`castable report`) builds a Markdown report from
+them: version, OS, settings, players, a count of error codes, and the last 300 lines, with URL
+queries, passwords, tokens and cookies redacted (`report.rs`).
+
+### 7.1 Errors
+
+One catalog for every error: `CastError { code: ErrorCode, detail }` in `castable-core`
+(`errors.rs`). Codes sit in buckets (`ErrorCategory`) whose digit starts the number: 1xx player,
+2xx network, 4xx media, 6xx control (UPnP faults map one to one), 7xx config, 8xx system, 9xx
+unknown. JSON carries `code`, `id` (`E403`), `category` and `detail`; logs carry the same fields.
+
+- **Players map, the core names.** Each source turns its own signals into a code: Rust players
+  through one table of phrases in `castable-players/src/diagnose.rs` (`HTTP error 403` →
+  `forbidden`), the web player from `MediaError` codes, the receiver from I/O errors. The player's
+  own words become `detail`.
+- **Screens translate codes.** A message per category, plus specific ones per code where useful.
+  A new code shows its category's message until it gets its own.
+- **Adding a code** is one line in the `codes!` table. A test keeps numbers unique and in their
+  bucket; `fixtures/errors.ts` fails `pnpm typecheck` if TypeScript's `ErrorCode` falls behind;
+  `docs/ERRORS.md` is generated from the table.
 
 ## 8. Cross-language types
 
@@ -328,6 +352,6 @@ updates the matching section here:
   re-run `models/system` (§11)
 - the `Player` seam or the cast flow (§4)
 - the `players.toml` schema or a control protocol (§5)
-- config locations, CLI screens or log messages (§6, §7)
+- config locations, CLI screens, log messages or error codes (§6, §7, §7.1)
 
 The PR template asks about it. If a section is out of date, fixing it is a welcome PR on its own.

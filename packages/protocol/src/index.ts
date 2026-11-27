@@ -57,7 +57,7 @@ export type ReceiverView = { transportState: TransportState } & (
       positionSecs: number;
       durationSecs?: number;
     }
-  | { phase: "unloaded"; gen: Gen; media: MediaDescriptor; error?: string }
+  | { phase: "unloaded"; gen: Gen; media: MediaDescriptor; error?: CastError }
 );
 
 /** Identifies one load; events from an older load are ignored by the core. */
@@ -76,7 +76,7 @@ export type PlayerCommand =
 /** What the player reports back. Mirrors `PlayerEvent`. */
 export type PlayerEvent =
   | { type: "loaded"; gen: Gen; durationSecs?: number }
-  | { type: "loadFailed"; gen: Gen; reason: string }
+  | { type: "loadFailed"; gen: Gen; error: ErrorReport }
   | { type: "progress"; gen: Gen; positionSecs: number; durationSecs?: number }
   | { type: "ended"; gen: Gen }
   /** The player went away (its process exited, its window was closed): nothing is loaded. */
@@ -98,4 +98,61 @@ export type SenderCommand =
 export interface ScreenCommand {
   gen: Gen;
   command: SenderCommand;
+}
+
+/** The error buckets. A code's number starts with its bucket's digit. Mirrors `ErrorCategory`. */
+export type ErrorCategory = "player" | "network" | "media" | "control" | "config" | "system" | "unknown";
+
+/**
+ * Every error code. Mirrors `ErrorCode` (crates/castable-core/src/errors.rs);
+ * `fixtures/errors.ts` lists every Rust code, so a missing one fails typecheck.
+ */
+export type ErrorCode =
+  // player (1xx)
+  | "player_missing"
+  | "player_crashed"
+  | "player_unresponsive"
+  // network (2xx)
+  | "network"
+  | "timeout"
+  // media (4xx)
+  | "forbidden"
+  | "not_found"
+  | "unsupported"
+  | "decode"
+  // control (6xx)
+  | "invalid_action"
+  | "invalid_args"
+  | "action_failed"
+  | "not_now"
+  | "seek_not_supported"
+  | "seek_out_of_range"
+  | "mime_not_accepted"
+  | "invalid_instance"
+  // config (7xx)
+  | "settings_invalid"
+  | "players_file_invalid"
+  | "player_unknown"
+  | "player_not_for_this_os"
+  | "bad_argument"
+  // system (8xx)
+  | "port_in_use"
+  | "no_network"
+  | "io"
+  // unknown (9xx)
+  | "unknown";
+
+/** What a player reports: a code, and its own words if it has any. */
+export interface ErrorReport {
+  code: ErrorCode;
+  detail?: string;
+  /** Present when the error came from the core; players needn't set them. */
+  id?: string;
+  category?: ErrorCategory;
+}
+
+/** An error as the core sends it: `{ code: "forbidden", id: "E403", category: "media", detail }`. Mirrors `CastError`. */
+export interface CastError extends ErrorReport {
+  id: string;
+  category: ErrorCategory;
 }

@@ -104,6 +104,17 @@ if (command === "players") {
   }
   const { execFileSync } = await import("node:child_process");
   execFileSync(bin, ["--players"], { stdio: "inherit" });
+} else if (command === "report") {
+  // The receiver gathers it (it knows this OS's paths); this just says where it went.
+  const bin = sys.findReceiver();
+  if (!bin) {
+    console.error("castable-receiver isn't built yet: run `castable setup` first.");
+    process.exit(1);
+  }
+  const { execFileSync } = await import("node:child_process");
+  const file = execFileSync(bin, ["--report", ...process.argv.slice(3)], { encoding: "utf8" }).trim();
+  console.log(`Report written to ${file}`);
+  console.log("Check it, then attach it to an issue: https://github.com/vincecao/castable-core/issues/new");
 } else if (["", "setup", "start"].includes(command)) {
   if (!process.stdin.isTTY) {
     console.error("castable needs a terminal for its keyboard screens: run it directly, not piped.");
@@ -117,6 +128,6 @@ if (command === "players") {
   await app.waitUntilExit();
   if (saved) console.log(" Saved. Run `castable start` when you want phones to find this computer.");
 } else {
-  console.log("castable [setup | start | players]");
+  console.log("castable [setup | start | players | report [FILE]]");
   process.exit(command === "help" || command === "--help" ? 0 : 1);
 }

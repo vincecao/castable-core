@@ -33,6 +33,14 @@ export function titleOf(title: string, url: string): string {
   }
 }
 
+/** "E403 forbidden: <detail or summary>" for a log line that carries an error code. */
+export function errorText(line: Line): string | null {
+  const code = str(line.code);
+  if (!/^E\d+$/.test(code)) return null;
+  const about = str(line.detail) || str(line.summary) || str(line.message);
+  return `${code} ${str(line.error)}${about ? `: ${about}` : ""}`;
+}
+
 /** One log line in; the next status out. Lines that aren't JSON or don't matter change nothing. */
 export function fold(status: Status, raw: string): Status {
   let line: Line;
@@ -64,11 +72,17 @@ export function fold(status: Status, raw: string): Status {
     case "control refused":
       return say(`refused ${str(line.action)} (${str(line.code)})`);
     case "player event":
-      if (line.event === "load_failed") return say(`failed: ${str(line.reason)}`, { problem: str(line.reason) });
+      if (line.event === "load_failed") {
+        const text = errorText(line) ?? "failed";
+        return say(`failed: ${text}`, { problem: text });
+      }
       if (line.event === "closed") return say("player closed: Play opens it again");
       return status;
     default:
-      if (level === "WARN" || level === "ERROR") return say(str(line.message), { problem: str(line.message) });
+      if (level === "WARN" || level === "ERROR") {
+        const text = errorText(line) ?? str(line.message);
+        return say(text, { problem: text });
+      }
       return status;
   }
 }

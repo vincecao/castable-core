@@ -20,7 +20,10 @@ mod http;
 pub mod player;
 mod ssdp;
 
-pub use castable_core::{DeviceInfo, Gen, MediaDescriptor, PlayerCommand, PlayerEvent, ScreenCommand, SenderCommand};
+pub use castable_core::{
+    CastError, DeviceInfo, ErrorCategory, ErrorCode, Gen, MediaDescriptor, PlayerCommand, PlayerEvent, ScreenCommand,
+    SenderCommand,
+};
 pub use player::{run, Control, Player};
 
 /// This machine's address on the network senders use (the route to the

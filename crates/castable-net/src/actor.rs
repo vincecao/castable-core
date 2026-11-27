@@ -3,7 +3,7 @@
 
 use crate::gena::{Delivery, SubscribeRequest, Subscriptions};
 use castable_core::{
-    Action, PlayerCommand, PlayerEvent, Renderer, Reply, ScreenCommand, Service, TransportState, UpnpError,
+    Action, ErrorCode, PlayerCommand, PlayerEvent, Renderer, Reply, ScreenCommand, Service, TransportState, UpnpError,
 };
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -63,7 +63,8 @@ impl Actor {
                 }
                 let result = self.renderer.act(action).map(|r| self.apply(r));
                 if let Err(e) = &result {
-                    tracing::info!(action = name, code = e.code(), error = %e, "control refused");
+                    let code = ErrorCode::from(e);
+                    tracing::info!(action = name, code = %code.id(), error = code.name(), category = code.category().name(), upnp = e.code(), "control refused");
                 }
                 let _ = reply.send(result);
             }
@@ -71,8 +72,18 @@ impl Actor {
                 let (kind, gen) = (event.kind(), event.gen().0);
                 if matches!(event, PlayerEvent::Progress { .. }) {
                     tracing::trace!(event = kind, gen, "player event");
-                } else if let PlayerEvent::LoadFailed { reason, .. } = &event {
-                    tracing::warn!(event = kind, gen, reason = %reason, "player event");
+                } else if let PlayerEvent::LoadFailed { error, .. } = &event {
+                    let c = error.code;
+                    tracing::warn!(
+                        event = kind,
+                        gen,
+                        code = %c.id(),
+                        error = c.name(),
+                        category = c.category().name(),
+                        detail = error.detail.as_deref().unwrap_or(""),
+                        summary = c.summary(),
+                        "player event"
+                    );
                 } else {
                     tracing::info!(event = kind, gen, "player event");
                 }
@@ -86,7 +97,10 @@ impl Actor {
                     Ok(reply) => {
                         self.apply(reply);
                     }
-                    Err(e) => tracing::info!(command, code = e.code(), error = %e, "screen press refused"),
+                    Err(e) => {
+                        let code = ErrorCode::from(&e);
+                        tracing::info!(command, code = %code.id(), error = code.name(), category = code.category().name(), upnp = e.code(), "screen press refused")
+                    }
                 }
             }
             Msg::Subscribe { service, req, reply } => {

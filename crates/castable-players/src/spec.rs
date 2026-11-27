@@ -193,7 +193,7 @@ fn split(line: &str) -> Result<Vec<String>, String> {
     Ok(words)
 }
 
-const KNOWN: &[&str] = &["url", "title", "referer", "user_agent", "headers", "ipc", "port", "password"];
+const KNOWN: &[&str] = &["url", "title", "referer", "user_agent", "headers", "font", "ipc", "port", "password"];
 
 fn placeholders(word: &str) -> impl Iterator<Item = &str> {
     word.split('{').skip(1).filter_map(|rest| rest.split_once('}').map(|(name, _)| name))

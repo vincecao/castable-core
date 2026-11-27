@@ -105,7 +105,12 @@ export const views = [
     "transportState": "STOPPED"
   },
   {
-    "error": "network error",
+    "error": {
+      "category": "network",
+      "code": "network",
+      "detail": "network error",
+      "id": "E201"
+    },
     "gen": 1,
     "media": {
       "delivery": {

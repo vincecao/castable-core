@@ -8,6 +8,7 @@ mod descriptor;
 pub mod device;
 mod didl;
 mod error;
+mod errors;
 mod renderer;
 pub mod service;
 mod session;
@@ -18,6 +19,7 @@ mod xml;
 pub use descriptor::{Delivery, MediaDescriptor, MediaKind};
 pub use device::DeviceInfo;
 pub use error::UpnpError;
+pub use errors::{CastError, ErrorCategory, ErrorCode};
 pub use renderer::{Action, Renderer, Reply};
 pub use service::Service;
 pub use session::{

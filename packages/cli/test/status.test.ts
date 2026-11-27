@@ -23,8 +23,12 @@ test("folds a real cast into the status screen", () => {
 });
 
 test("a failure shows until the next cast", () => {
-  let s = fold(initialStatus, `{"level":"WARN","message":"player event","event":"load_failed","gen":1,"reason":"404"}`);
-  assert.equal(s.problem, "404");
+  let s = fold(
+    initialStatus,
+    `{"level":"WARN","message":"player event","event":"load_failed","gen":1,"code":"E404","error":"not_found","category":"media","detail":"HTTP error 404 Not Found"}`,
+  );
+  assert.equal(s.problem, "E404 not_found: HTTP error 404 Not Found");
+  assert.equal(s.recent.at(-1), "failed: E404 not_found: HTTP error 404 Not Found");
   s = fold(s, lines[2]!);
   assert.equal(s.problem, null);
 });
@@ -39,4 +43,9 @@ test("without a title, the file name stands in", async () => {
 test("a closed player says how to get it back", () => {
   const s = fold(initialStatus, `{"level":"INFO","message":"player event","event":"closed","gen":1}`);
   assert.equal(s.recent.at(-1), "player closed: Play opens it again");
+});
+
+test("any coded error reads the same, with the summary when there's no detail", () => {
+  const s = fold(initialStatus, `{"level":"ERROR","message":"can't start the player","code":"E101","error":"player_missing","summary":"the player isn't installed or can't start"}`);
+  assert.equal(s.problem, "E101 player_missing: the player isn't installed or can't start");
 });

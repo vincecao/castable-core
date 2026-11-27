@@ -163,7 +163,10 @@ impl World {
         }
         for &gen in &self.player.issued {
             v.push(Input::Player(PlayerEvent::Loaded { gen, duration: Some(Duration::from_secs(60)) }));
-            v.push(Input::Player(PlayerEvent::LoadFailed { gen, reason: "404".into() }));
+            v.push(Input::Player(PlayerEvent::LoadFailed {
+                gen,
+                error: CastError::with_detail(ErrorCode::NotFound, "404"),
+            }));
             v.push(Input::Player(PlayerEvent::Ended { gen }));
             v.push(Input::Player(PlayerEvent::Closed { gen }));
             // Presses on the receiver's screen, made while it showed `gen`
@@ -229,7 +232,10 @@ fn bug_path_never_stuck_loading() {
     // phone casts a video → the video fails to load
     let w = replay(vec![
         cast("http://a/1.mp4"),
-        Input::Player(PlayerEvent::LoadFailed { gen: Gen(1), reason: "404".into() }),
+        Input::Player(PlayerEvent::LoadFailed {
+            gen: Gen(1),
+            error: CastError::with_detail(ErrorCode::NotFound, "404"),
+        }),
     ]);
     assert_eq!(w.session.transport_state(), TransportState::Stopped);
     assert_eq!(w.session.transport_status(), "ERROR_OCCURRED");
@@ -239,7 +245,10 @@ fn bug_path_never_stuck_loading() {
 fn play_after_a_failed_load_retries() {
     let mut w = replay(vec![
         cast("http://a/1.mp4"),
-        Input::Player(PlayerEvent::LoadFailed { gen: Gen(1), reason: "timeout".into() }),
+        Input::Player(PlayerEvent::LoadFailed {
+            gen: Gen(1),
+            error: CastError::with_detail(ErrorCode::NotFound, "timeout"),
+        }),
         sender(SenderCommand::Play),
     ]);
     assert_eq!(w.session.transport_state(), TransportState::Transitioning);

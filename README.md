@@ -52,6 +52,11 @@ target/release/castable-receiver --players
 Settings live in `config.toml` in Castable's folder: `~/.config/castable` on macOS and Linux,
 `%APPDATA%\castable` on Windows.
 
+Players show titles and subtitles in a font that covers Chinese, Japanese and Korean as well as
+Latin: PingFang SC on macOS, Microsoft YaHei on Windows, Noto Sans CJK SC on Linux. To use another,
+add `font = "Songti SC"` to `config.toml`; `font = ""` keeps the player's own. When the phone sends
+no title, the player shows the video's file name, decoded (`后会友期`, not `%E5%90%8E…`).
+
 ## Players
 
 Players are data, not code. Each is an entry in
@@ -98,6 +103,31 @@ INFO transport from="TRANSITIONING" to="PLAYING" gen=1
 - `RUST_LOG=debug castable-receiver`, or `RUST_LOG=castable_net::http=debug` for one part.
 - `--log json` prints one JSON object per line; the status screen reads exactly this.
 - A level that is off costs one check and builds nothing.
+
+### Errors
+
+Every error has a code, the same whichever player or phone hit it. The first digit is its category:
+1xx player, 2xx network, 4xx media, 6xx phone commands, 7xx settings, 8xx this computer.
+
+```
+WARN player event event="load_failed" code="E403" error="forbidden" category="media" detail="[ffmpeg] https: HTTP error 403 Forbidden"
+```
+
+The full list is in [docs/ERRORS.md](docs/ERRORS.md), generated from the code.
+
+### Reporting a problem
+
+Every run also writes a detailed log, including what the player printed, to `logs/receiver.log` in
+Castable's folder (the previous run's is `receiver.1.log`). To share it:
+
+```sh
+pnpm castable report        # or: castable-receiver --report [FILE]
+```
+
+This writes `castable-report-….md` with your OS, settings, players, the error codes seen and the
+last log lines. URL queries, passwords, tokens and cookies are replaced with `…`. Check it, then
+attach it to an [issue](https://github.com/vincecao/castable-core/issues/new).
+`--log-file PATH` moves the log; `--no-log-file` turns it off.
 
 ## Test without a phone
 

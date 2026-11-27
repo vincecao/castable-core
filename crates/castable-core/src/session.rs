@@ -15,6 +15,7 @@
 
 use crate::descriptor::MediaDescriptor;
 use crate::error::UpnpError;
+use crate::errors::CastError;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -53,7 +54,7 @@ pub enum Playback {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Unloaded {
     StoppedWhileLoading,
-    LoadFailed(String),
+    LoadFailed(CastError),
     /// The player went away (its process exited, its window was closed).
     PlayerClosed,
 }
@@ -110,7 +111,7 @@ pub enum PhaseView<'a> {
     Unloaded {
         media: &'a MediaDescriptor,
         #[serde(skip_serializing_if = "Option::is_none")]
-        error: Option<&'a str>,
+        error: Option<&'a CastError>,
     },
 }
 
@@ -168,7 +169,7 @@ pub enum PlayerEvent {
     },
     LoadFailed {
         gen: Gen,
-        reason: String,
+        error: CastError,
     },
     Progress {
         gen: Gen,
@@ -331,7 +332,7 @@ impl Session {
             Phase::Unloaded { cast, why } => PhaseView::Unloaded {
                 media: &cast.media,
                 error: match why {
-                    Unloaded::LoadFailed(reason) => Some(reason),
+                    Unloaded::LoadFailed(error) => Some(error),
                     Unloaded::StoppedWhileLoading | Unloaded::PlayerClosed => None,
                 },
             },
@@ -465,12 +466,12 @@ impl Phase {
                 };
                 (Phase::Loaded { cast, playback }, commands)
             }
-            (Phase::Loading { cast, .. }, PlayerEvent::LoadFailed { reason, .. }) => {
-                (Phase::Unloaded { cast, why: Unloaded::LoadFailed(reason) }, vec![])
+            (Phase::Loading { cast, .. }, PlayerEvent::LoadFailed { error, .. }) => {
+                (Phase::Unloaded { cast, why: Unloaded::LoadFailed(error) }, vec![])
             }
             // Media that fails mid-playback: make sure the player is stopped too.
-            (Phase::Loaded { cast, .. }, PlayerEvent::LoadFailed { reason, .. }) => {
-                (Phase::Unloaded { cast, why: Unloaded::LoadFailed(reason) }, vec![PlayerCommand::Stop])
+            (Phase::Loaded { cast, .. }, PlayerEvent::LoadFailed { error, .. }) => {
+                (Phase::Unloaded { cast, why: Unloaded::LoadFailed(error) }, vec![PlayerCommand::Stop])
             }
             (Phase::Loaded { mut cast, playback }, PlayerEvent::Progress { position, duration, .. }) => {
                 cast.position = position;

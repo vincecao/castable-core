@@ -1,6 +1,7 @@
 //! The "mpv-ipc" protocol: mpv's JSON IPC socket (mpv, IINA, other mpv front-ends).
 
-use castable_net::{Gen, Handle, PlayerCommand, PlayerEvent};
+use crate::diagnose::{classify, Tail};
+use castable_net::{CastError, ErrorCode, Gen, Handle, PlayerCommand, PlayerEvent};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -41,7 +42,13 @@ async fn connect(path: &std::path::Path) -> std::io::Result<tokio::net::windows:
 /// One player's IPC conversation: sends queued commands (they wait until the
 /// endpoint is up, so nothing sent during start-up is lost) and turns mpv's
 /// events into PlayerEvents.
-pub async fn session(gen: Gen, endpoint: PathBuf, mut controls: UnboundedReceiver<PlayerCommand>, handle: Handle) {
+pub async fn session(
+    gen: Gen,
+    endpoint: PathBuf,
+    mut controls: UnboundedReceiver<PlayerCommand>,
+    handle: Handle,
+    tail: Tail,
+) {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     let started = Instant::now();
     let stream = loop {
@@ -51,7 +58,8 @@ pub async fn session(gen: Gen, endpoint: PathBuf, mut controls: UnboundedReceive
                 tokio::time::sleep(Duration::from_millis(100)).await
             }
             Err(e) => {
-                handle.player_event(PlayerEvent::LoadFailed { gen, reason: format!("the player didn't start: {e}") });
+                let error = tail.refine(CastError::with_detail(ErrorCode::PlayerUnresponsive, format!("IPC: {e}")));
+                handle.player_event(PlayerEvent::LoadFailed { gen, error });
                 return;
             }
         }
@@ -77,8 +85,14 @@ pub async fn session(gen: Gen, endpoint: PathBuf, mut controls: UnboundedReceive
             line = lines.next_line() => {
                 let Ok(Some(line)) = line else { return };
                 let Ok(msg) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
-                if let Some(event) = read_event(gen, &msg, &mut loaded, &mut duration, &mut last_progress) {
-                    handle.player_event(event);
+                match read_event(gen, &msg, &mut loaded, &mut duration, &mut last_progress) {
+                    // mpv says only "loading failed"; its output usually says why.
+                    Some(PlayerEvent::LoadFailed { gen, error }) => {
+                        tokio::time::sleep(Duration::from_millis(150)).await;
+                        handle.player_event(PlayerEvent::LoadFailed { gen, error: tail.refine(error) });
+                    }
+                    Some(event) => handle.player_event(event),
+                    None => {}
                 }
             }
         }
@@ -110,10 +124,11 @@ fn read_event(
         }
         (Some("end-file"), _) => match msg["reason"].as_str() {
             Some("eof") => Some(PlayerEvent::Ended { gen }),
-            Some("error") => Some(PlayerEvent::LoadFailed {
-                gen,
-                reason: msg["file_error"].as_str().unwrap_or("the player couldn't play it").to_string(),
-            }),
+            Some("error") => {
+                let said = msg["file_error"].as_str().unwrap_or_default();
+                let code = classify(said).unwrap_or(ErrorCode::Unknown);
+                Some(PlayerEvent::LoadFailed { gen, error: CastError::with_detail(code, said) })
+            }
             _ => None, // stopped or replaced by us
         },
         _ => None,

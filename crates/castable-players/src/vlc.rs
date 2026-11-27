@@ -1,7 +1,8 @@
 //! The "vlc-http" protocol: VLC's web remote, on 127.0.0.1 only, with a
 //! random password per cast.
 
-use castable_net::{Gen, Handle, PlayerCommand, PlayerEvent};
+use crate::diagnose::Tail;
+use castable_net::{CastError, ErrorCode, Gen, Handle, PlayerCommand, PlayerEvent};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -58,7 +59,13 @@ impl Default for Remote {
 }
 
 /// One VLC's remote session: sends queued controls, polls status into events.
-pub async fn session(gen: Gen, remote: Remote, mut controls: UnboundedReceiver<PlayerCommand>, handle: Handle) {
+pub async fn session(
+    gen: Gen,
+    remote: Remote,
+    mut controls: UnboundedReceiver<PlayerCommand>,
+    handle: Handle,
+    tail: Tail,
+) {
     let started = Instant::now();
     let mut poll = tokio::time::interval(Duration::from_millis(500));
     let (mut loaded, mut last_progress) = (false, Instant::now());
@@ -72,7 +79,8 @@ pub async fn session(gen: Gen, remote: Remote, mut controls: UnboundedReceiver<P
             _ = poll.tick() => {
                 let Ok(status) = remote.status(None).await else {
                     if !loaded && started.elapsed() > Duration::from_secs(30) {
-                        handle.player_event(PlayerEvent::LoadFailed { gen, reason: "VLC's remote never answered".into() });
+                        let error = tail.refine(CastError::with_detail(ErrorCode::PlayerUnresponsive, "VLC's web remote never answered"));
+                        handle.player_event(PlayerEvent::LoadFailed { gen, error });
                         return;
                     }
                     continue; // not up yet: keep the pending controls

@@ -5,7 +5,7 @@ use crate::actor::Msg;
 use crate::gena::SubscribeRequest;
 use bytes::Bytes;
 use castable_core::device::DESCRIPTION_PATH;
-use castable_core::{soap, Action, DeviceInfo, Service, UpnpError};
+use castable_core::{soap, Action, DeviceInfo, ErrorCode, Service, UpnpError};
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::body::Incoming;
 use hyper::header::{HeaderValue, CONTENT_TYPE, SERVER};
@@ -79,9 +79,13 @@ async fn control(service: Service, req: Request<Incoming>, ctx: &Ctx) -> Resp {
         Err(_) => return empty(StatusCode::PAYLOAD_TOO_LARGE),
     };
     let result = async {
-        let call = soap::parse_request(&body)?;
+        let call = soap::parse_request(&body).inspect_err(|e| {
+            let c = ErrorCode::from(e);
+            tracing::info!(service = service.id(), code = %c.id(), error = c.name(), category = c.category().name(), upnp = e.code(), bytes = body.len(), "control refused: the request isn't valid SOAP")
+        })?;
         let action = Action::parse(service, &call).inspect_err(|e| {
-            tracing::info!(service = service.id(), action = %call.action, code = e.code(), error = %e, "control refused")
+            let c = ErrorCode::from(e);
+            tracing::info!(service = service.id(), action = %call.action, code = %c.id(), error = c.name(), category = c.category().name(), upnp = e.code(), "control refused")
         })?;
         let (reply, rx) = oneshot::channel();
         ctx.actor.send(Msg::Act { action, reply }).map_err(|_| UpnpError::ActionFailed)?;

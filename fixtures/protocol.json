@@ -44,8 +44,22 @@
       "type": "loaded"
     },
     {
+      "error": {
+        "category": "media",
+        "code": "not_found",
+        "detail": "HTTP error 404 Not Found",
+        "id": "E404"
+      },
       "gen": 1,
-      "reason": "404",
+      "type": "loadFailed"
+    },
+    {
+      "error": {
+        "category": "player",
+        "code": "player_crashed",
+        "id": "E102"
+      },
+      "gen": 2,
       "type": "loadFailed"
     },
     {

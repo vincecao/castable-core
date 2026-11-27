@@ -4,7 +4,9 @@
 use crate::process::{report_spawn_error, OnExit, Proc};
 use crate::spec::{Control, PlayerSpec, Vars};
 use crate::{mpv, vlc};
-use castable_net::{player::assume_loaded, Gen, Handle, MediaDescriptor, Player, PlayerCommand, PlayerEvent};
+use castable_net::{
+    player::assume_loaded, CastError, ErrorCode, Gen, Handle, MediaDescriptor, Player, PlayerCommand, PlayerEvent,
+};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
@@ -15,6 +17,8 @@ pub struct External {
     program: PathBuf,
     handle: Handle,
     proc: Option<Proc>,
+    /// `{font}`: the font for on-screen text and subtitles, if set.
+    font: Option<String>,
     /// The cast loaded, if any.
     gen: Option<Gen>,
     /// Commands for the running player's control protocol (never `Load`).
@@ -23,13 +27,34 @@ pub struct External {
 }
 
 impl External {
-    pub fn new(name: &str, spec: PlayerSpec, handle: Handle) -> Result<Self, String> {
+    pub fn new(name: &str, spec: PlayerSpec, handle: Handle) -> Result<Self, CastError> {
         if !spec.runs_here() {
-            return Err(format!("player {name} isn't available on {}", std::env::consts::OS));
+            let os = std::env::consts::OS;
+            return Err(CastError::with_detail(
+                ErrorCode::PlayerNotForThisOs,
+                format!("{name} isn't available on {os}"),
+            ));
         }
-        let program =
-            spec.resolve_program().ok_or_else(|| format!("player {name}: none of {:?} is installed", spec.program))?;
-        Ok(Self { name: name.into(), spec, program, handle, proc: None, gen: None, ctl: None, warned: false })
+        let program = spec.resolve_program().ok_or_else(|| {
+            CastError::with_detail(ErrorCode::PlayerMissing, format!("{name}: none of {:?} is installed", spec.program))
+        })?;
+        Ok(Self {
+            name: name.into(),
+            spec,
+            program,
+            handle,
+            proc: None,
+            font: None,
+            gen: None,
+            ctl: None,
+            warned: false,
+        })
+    }
+
+    /// Sets `{font}` (see `Settings::font`).
+    pub fn with_font(mut self, font: Option<String>) -> Self {
+        self.font = font;
+        self
     }
 
     pub fn control(&self) -> Control {
@@ -51,6 +76,9 @@ impl External {
 
     fn load(&mut self, gen: Gen, media: &MediaDescriptor) {
         let mut vars = media_vars(media);
+        if let Some(font) = &self.font {
+            vars.insert("font", font.clone());
+        }
         let socket = mpv::endpoint(&format!("{}-{}", std::process::id(), gen.0));
         let remote = vlc::Remote::new();
         match self.spec.control {
@@ -76,6 +104,7 @@ impl External {
             Ok(p) => p,
             Err(e) => return report_spawn_error(&self.handle, gen, &self.name, e),
         };
+        let tail = proc.tail();
         self.proc = Some(proc);
         self.gen = Some(gen);
         let handle = self.handle.clone();
@@ -83,12 +112,12 @@ impl External {
             Control::MpvIpc => {
                 let (tx, rx) = unbounded_channel();
                 self.ctl = Some(tx);
-                tokio::spawn(mpv::session(gen, socket, rx, handle));
+                tokio::spawn(mpv::session(gen, socket, rx, handle, tail));
             }
             Control::VlcHttp => {
                 let (tx, rx) = unbounded_channel();
                 self.ctl = Some(tx);
-                tokio::spawn(vlc::session(gen, remote, rx, handle));
+                tokio::spawn(vlc::session(gen, remote, rx, handle, tail));
             }
             Control::Launch => assume_loaded(&handle, gen),
         }
@@ -99,9 +128,9 @@ impl External {
 fn media_vars(media: &MediaDescriptor) -> Vars {
     let mut vars = Vars::new();
     vars.insert("url", media.url.clone());
-    if let Some(t) = &media.title {
-        vars.insert("title", t.clone());
-    }
+    // Always a readable title: the sender's, else the decoded file name, so
+    // a player never shows "%E5%90%8E%E4%BC%9A.mp4".
+    vars.insert("title", media.display_title());
     let header = |name: &str| media.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.clone());
     if let Some(r) = header("Referer") {
         vars.insert("referer", r);
