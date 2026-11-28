@@ -56,7 +56,7 @@ Settings live in `config.toml` in Castable's folder: `~/.config/castable` on mac
 Players show titles and subtitles in a font that covers Chinese, Japanese and Korean as well as
 Latin: PingFang SC on macOS, Microsoft YaHei on Windows, Noto Sans CJK SC on Linux. To use another,
 add `font = "Songti SC"` to `config.toml`; `font = ""` keeps the player's own. When the phone sends
-no title, the player shows the video's file name, decoded (`后会友期`, not `%E5%90%8E…`).
+no title, the player shows the video's file name, decoded (`Episode 1`, not `Episode%201`).
 
 ## Players
 

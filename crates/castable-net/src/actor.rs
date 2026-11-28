@@ -5,10 +5,11 @@ use crate::gena::{Delivery, SubscribeRequest, Subscriptions};
 use castable_core::{
     Action, ErrorCode, PlayerCommand, PlayerEvent, Renderer, Reply, ScreenCommand, Service, TransportState, UpnpError,
 };
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 
 pub type Out = Vec<(&'static str, String)>;
 
@@ -30,10 +31,15 @@ pub struct Actor {
     subs: Subscriptions,
     commands: mpsc::UnboundedSender<PlayerCommand>,
     notifier: mpsc::UnboundedSender<Delivery>,
+    /// The current view as JSON, for an app that draws the receiver's screen.
+    views: watch::Sender<Arc<str>>,
 }
 
 impl Actor {
-    pub fn spawn(commands: mpsc::UnboundedSender<PlayerCommand>) -> mpsc::UnboundedSender<Msg> {
+    pub fn spawn(
+        commands: mpsc::UnboundedSender<PlayerCommand>,
+        views: watch::Sender<Arc<str>>,
+    ) -> mpsc::UnboundedSender<Msg> {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let (notifier, notify_rx) = mpsc::unbounded_channel();
         tokio::spawn(deliver_all(notify_rx));
@@ -43,10 +49,13 @@ impl Actor {
             subs: Subscriptions::default(),
             commands,
             notifier,
+            views,
         };
+        actor.publish();
         tokio::spawn(async move {
             while let Some(msg) = rx.recv().await {
                 actor.handle(msg);
+                actor.publish();
             }
         });
         tx
@@ -151,6 +160,19 @@ impl Actor {
             self.notify(service, None);
         }
         reply.out
+    }
+
+    /// Sends the view to watchers if it changed (a phone polling its state
+    /// changes nothing, so nothing is sent).
+    fn publish(&self) {
+        let Ok(json) = serde_json::to_string(&self.renderer.session().view()) else { return };
+        self.views.send_if_modified(|current| {
+            let changed = **current != *json;
+            if changed {
+                *current = json.into();
+            }
+            changed
+        });
     }
 
     fn notify(&mut self, service: Service, only: Option<&str>) {

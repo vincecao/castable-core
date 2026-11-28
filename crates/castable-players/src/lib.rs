@@ -17,7 +17,7 @@
 
 pub mod diagnose;
 pub mod external;
-mod mpv;
+pub mod mpv;
 mod process;
 pub mod report;
 pub mod settings;

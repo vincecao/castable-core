@@ -191,3 +191,14 @@ export interface MediaInfo {
     bitrateBps?: number;
   };
 }
+
+/**
+ * A player inside an app: applies each PlayerCommand and reports PlayerEvents
+ * through the callback it was created with. Every player (the web <video>
+ * driver, the native iOS/Android players) implements it, so an app wires any
+ * of them the same way. Mirrors the Rust `castable_net::Player` trait.
+ */
+export interface PlayerDriver {
+  apply(command: PlayerCommand): void;
+  destroy(): void;
+}
