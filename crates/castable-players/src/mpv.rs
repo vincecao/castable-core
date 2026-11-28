@@ -1,7 +1,12 @@
 //! The "mpv-ipc" protocol: mpv's JSON IPC socket (mpv, IINA, other mpv front-ends).
+//!
+//! An external player starts one mpv per cast. An app that embeds libmpv keeps
+//! one mpv running, opens its IPC socket (`input-ipc-server`), and for each
+//! cast runs [`session_from`] with [`load`] as the first messages: the same
+//! events, errors and media info as an external mpv.
 
 use crate::diagnose::{classify, Tail};
-use castable_net::{CastError, ErrorCode, Gen, Handle, MediaInfo, PlayerCommand, PlayerEvent};
+use castable_net::{CastError, ErrorCode, Gen, Handle, MediaDescriptor, MediaInfo, PlayerCommand, PlayerEvent};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -18,6 +23,29 @@ pub fn encode(ctl: &PlayerCommand) -> Vec<String> {
         PlayerCommand::SetMuted { muted: m } => vec![set("mute", &m.to_string())],
         PlayerCommand::Load { .. } => vec![], // a load starts a new player instead
     }
+}
+
+/// The IPC messages that load `media` into a running mpv, paused (the core
+/// says when to play): its request headers and title, then the file. Every
+/// option is set on each load, so nothing carries over from the last cast.
+pub fn load(media: &MediaDescriptor) -> Vec<String> {
+    let set =
+        |prop: &str, v: serde_json::Value| serde_json::json!({ "command": ["set_property", prop, v] }).to_string();
+    let header = |name: &str| media.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str());
+    let fields: Vec<String> = media
+        .headers
+        .iter()
+        .filter(|(k, _)| !k.eq_ignore_ascii_case("user-agent") && !k.eq_ignore_ascii_case("referer"))
+        .map(|(k, v)| format!("{k}: {v}"))
+        .collect();
+    vec![
+        set("pause", true.into()),
+        set("user-agent", header("user-agent").unwrap_or("libmpv").into()),
+        set("referrer", header("referer").unwrap_or("").into()),
+        set("http-header-fields", fields.into()),
+        set("force-media-title", media.title.clone().unwrap_or_default().into()),
+        serde_json::json!({ "command": ["loadfile", media.url, "replace"] }).to_string(),
+    ]
 }
 
 /// Where a player's IPC endpoint lives: a Unix socket, or a named pipe on Windows.
@@ -45,9 +73,22 @@ async fn connect(path: &std::path::Path) -> std::io::Result<tokio::net::windows:
 pub async fn session(
     gen: Gen,
     endpoint: PathBuf,
+    controls: UnboundedReceiver<PlayerCommand>,
+    handle: Handle,
+    tail: Tail,
+) {
+    session_from(gen, endpoint, controls, handle, tail, Vec::new()).await
+}
+
+/// [`session`], sending `first` once the properties are observed: for an
+/// embedded mpv, the [`load`] of this cast, so no event of it is missed.
+pub async fn session_from(
+    gen: Gen,
+    endpoint: PathBuf,
     mut controls: UnboundedReceiver<PlayerCommand>,
     handle: Handle,
     tail: Tail,
+    first: Vec<String>,
 ) {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     let started = Instant::now();
@@ -69,6 +110,9 @@ pub async fn session(
     for (id, name) in [(1, "duration"), (2, "time-pos")].into_iter().chain(INFO_PROPERTIES.iter().copied()) {
         let watch = format!(r#"{{"command":["observe_property",{id},"{name}"]}}"#);
         let _ = write.write_all(format!("{watch}\n").as_bytes()).await;
+    }
+    for msg in first {
+        let _ = write.write_all(format!("{msg}\n").as_bytes()).await;
     }
     let mut info = InfoTracker::default();
     // mpv reports properties one by one, in bursts: report once they settle.
@@ -290,6 +334,21 @@ mod tests {
         ));
         assert_eq!(read(json!({"event":"end-file","reason":"eof"})), Some(PlayerEvent::Ended { gen: Gen(1) }));
         assert_eq!(read(json!({"event":"end-file","reason":"stop"})), None);
+    }
+
+    #[test]
+    fn a_load_sets_every_option_then_opens_the_file_paused() {
+        let mut media = MediaDescriptor::from_url_and_mime("https://media.example.com/e1.m3u8", None);
+        media.title = Some("Episode 1".into());
+        media.headers.insert("Referer".into(), "https://media.example.com/".into());
+        media.headers.insert("X-Token".into(), "abc".into());
+        let msgs: Vec<serde_json::Value> = load(&media).iter().map(|m| serde_json::from_str(m).unwrap()).collect();
+        assert_eq!(msgs[0], json!({"command":["set_property","pause",true]}));
+        assert_eq!(msgs[1], json!({"command":["set_property","user-agent","libmpv"]}));
+        assert_eq!(msgs[2], json!({"command":["set_property","referrer","https://media.example.com/"]}));
+        assert_eq!(msgs[3], json!({"command":["set_property","http-header-fields",["X-Token: abc"]]}));
+        assert_eq!(msgs[4], json!({"command":["set_property","force-media-title","Episode 1"]}));
+        assert_eq!(msgs[5], json!({"command":["loadfile","https://media.example.com/e1.m3u8","replace"]}));
     }
 
     #[test]
