@@ -87,7 +87,7 @@ export type ReceiverView = {
       durationSecs?: number;
       /** What the player reported: resolution, codecs, bitrates. */
       info?: MediaInfo;
-      /** A short badge from `info`: "1080p", "4K · HDR10". */
+      /** A short badge from `info`: "1080p", "4K · HDR10"; a picture of no standard size shows its size, "2592×1080". */
       qualityLabel?: string;
       /** Playback speed; 1 is normal. */
       rate: number;

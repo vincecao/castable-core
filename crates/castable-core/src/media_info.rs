@@ -113,19 +113,13 @@ impl MediaInfo {
             || moved(self.audio.as_ref().and_then(|a| a.bitrate_bps), before.audio.as_ref().and_then(|a| a.bitrate_bps))
     }
 
-    /// The usual name for a picture size: "4K", "1080p", "720p", "SD".
-    pub fn resolution_label(&self) -> Option<&'static str> {
+    /// The usual name for a picture size ("4K", "1080p", "720p", "SD") when
+    /// it's a standard frame, else its exact size ("2592×1080"): a wide
+    /// picture of no standard width could be a crop of a bigger class or a
+    /// smaller one stretched, so it isn't given a class it may not have.
+    pub fn resolution_label(&self) -> Option<String> {
         let v = self.video.as_ref()?;
-        let (w, h) = (v.width?, v.height?);
-        // By the longer edge's class, so 1920×800 (cinema crop) is still 1080p.
-        Some(match (w, h) {
-            (w, h) if w >= 3800 || h >= 2100 => "4K",
-            (w, h) if w >= 2500 || h >= 1400 => "1440p",
-            (w, h) if w >= 1900 || h >= 1000 => "1080p",
-            (w, h) if w >= 1200 || h >= 700 => "720p",
-            (_, h) if h >= 470 => "480p",
-            _ => "SD",
-        })
+        Some(frame_label(v.width?, v.height?))
     }
 
     /// A short badge: the resolution and, if any, the HDR format ("1080p",
@@ -144,8 +138,9 @@ impl MediaInfo {
         let mut video = Vec::new();
         if let Some(v) = &self.video {
             if let (Some(w), Some(h)) = (v.width, v.height) {
-                video.extend(self.resolution_label().map(str::to_owned));
-                video.push(format!("{w}×{h}"));
+                let size = format!("{w}×{h}");
+                video.extend(self.resolution_label().filter(|label| *label != size));
+                video.push(size);
             }
             video.extend(v.codec.as_deref().map(codec_name));
             video.extend(v.hdr.clone());
@@ -216,6 +211,34 @@ fn trim_float(x: f64) -> String {
     s.trim_end_matches('0').trim_end_matches('.').to_owned()
 }
 
+/// Standard frames and their names, largest first. A picture this wide is
+/// that class at any shorter height (a cinema crop: 1920×800 is 1080p), and
+/// this tall at any narrower width (pillarboxed: 1440×1080 is 1080p).
+const FRAMES: [(u32, u32, &str); 7] = [
+    (7680, 4320, "8K"),
+    (4096, 2160, "4K"),
+    (3840, 2160, "4K"),
+    (2560, 1440, "1440p"),
+    (1920, 1080, "1080p"),
+    (1280, 720, "720p"),
+    (854, 480, "480p"),
+];
+
+/// Within 1%: encoders round sizes to multiples of 8 or 16.
+fn near(a: u32, b: u32) -> bool {
+    a.abs_diff(b) * 100 <= b
+}
+
+fn frame_label(w: u32, h: u32) -> String {
+    let named =
+        FRAMES.iter().find(|&&(fw, fh, _)| (near(w, fw) && h <= fh + fh / 100) || (near(h, fh) && w <= fw + fw / 100));
+    match named {
+        Some(&(_, _, name)) => name.to_owned(),
+        None if w < 854 && h < 480 => "SD".to_owned(),
+        None => format!("{w}×{h}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,13 +274,31 @@ mod tests {
             video: Some(VideoInfo { width: Some(3840), height: Some(1600), ..Default::default() }),
             ..Default::default()
         };
-        assert_eq!(cinema.resolution_label(), Some("4K"));
+        assert_eq!(cinema.resolution_label().as_deref(), Some("4K"));
         assert_eq!(rate(44_100), "44 kb/s");
         assert_eq!(MediaInfo::default().summary(), "");
         assert_eq!(hls_1080().short_label().as_deref(), Some("1080p"));
         let mut hdr = cinema.clone();
         hdr.video.as_mut().unwrap().hdr = Some("HDR10".into());
         assert_eq!(hdr.short_label().as_deref(), Some("4K · HDR10"));
+    }
+
+    #[test]
+    fn standard_frames_get_names_and_others_their_size() {
+        let label = |w, h| frame_label(w, h);
+        assert_eq!(label(1920, 1080), "1080p");
+        assert_eq!(label(1920, 800), "1080p", "a cinema crop keeps its class");
+        assert_eq!(label(1440, 1080), "1080p", "pillarboxed 4:3");
+        assert_eq!(label(1920, 1088), "1080p", "encoders pad to 16");
+        assert_eq!(label(3840, 1600), "4K");
+        assert_eq!(label(4096, 1716), "4K");
+        assert_eq!(label(2560, 1072), "1440p");
+        assert_eq!(label(1280, 534), "720p");
+        assert_eq!(label(640, 360), "SD");
+        assert_eq!(label(2592, 1080), "2592×1080", "wide, no standard width: its size, not a guess");
+        let mut wide = hls_1080();
+        wide.video.as_mut().unwrap().width = Some(2592);
+        assert!(wide.summary().starts_with("2592×1080 · H.264"), "{}", wide.summary());
     }
 
     #[test]
