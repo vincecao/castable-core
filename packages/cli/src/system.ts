@@ -77,16 +77,46 @@ export function writeSettings(path: string, toml: string): void {
 
 export const defaultName = () => `Castable (${hostname().replace(/\.local$/, "")})`;
 
-/** Starts the receiver with its JSON log on stdout, one line per callback. */
+/**
+ * Starts the receiver with its JSON log on stdout, one line per callback, and
+ * its stdin open for player keys (`--control stdin`; see sendKey).
+ */
 export function startReceiver(bin: string, config: string, onLine: (line: string) => void): ChildProcess {
   // Progress (position, duration) is logged at trace; the status screen wants it.
   const env = { ...process.env, RUST_LOG: process.env.RUST_LOG ?? "info,castable_net::actor=trace" };
-  const child = spawn(bin, ["--config", config, "--log", "json"], { stdio: ["ignore", "pipe", "pipe"], env });
+  const child = spawn(bin, ["--config", config, "--log", "json", "--control", "stdin"], {
+    stdio: ["pipe", "pipe", "pipe"],
+    env,
+  });
   createInterface({ input: child.stdout! }).on("line", onLine);
   createInterface({ input: child.stderr! }).on("line", (l) =>
     onLine(JSON.stringify({ level: "ERROR", message: l })),
   );
   return child;
+}
+
+/**
+ * The player keys the receiver understands (castable-core `keys.rs`): the same
+ * table as the apps' screens, so a key does the same thing everywhere.
+ */
+export type PlayerKey =
+  | "play-pause"
+  | "seek-back"
+  | "seek-forward"
+  | "step-back"
+  | "step-forward"
+  | "jump-back"
+  | "jump-forward"
+  | "volume-up"
+  | "volume-down"
+  | "mute"
+  | "slower"
+  | "faster"
+  | "back";
+
+/** Presses a player key on the running receiver; it acts on what it shows now. */
+export function sendKey(child: ChildProcess, key: PlayerKey): void {
+  if (child.stdin?.writable) child.stdin.write(`${key}\n`);
 }
 
 /** Opens a file in its default app (a text editor or viewer). False if that can't start. */

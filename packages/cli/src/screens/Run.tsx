@@ -1,6 +1,6 @@
 // Runs the receiver and shows its live status. Keys come from one table, so
 // the hint line always matches what the keys do.
-import { useApp, useInput } from "ink";
+import { useApp, useInput, type Key } from "ink";
 import { dirname } from "node:path";
 import { memo, useEffect, useReducer, useRef } from "react";
 import Dashboard from "../components/Dashboard.tsx";
@@ -46,7 +46,26 @@ const SHORTCUTS: readonly Shortcut[] = [
   },
 ];
 
-const HINT = SHORTCUTS.map((s) => `${s.key} ${s.label}`).join(" · ");
+/** Player keys, as in the apps (castable-core keys.rs): Ink's key names → the receiver's. */
+function playerKey(input: string, key: Key): sys.PlayerKey | null {
+  if (input === " " || input === "k") return "play-pause";
+  if (key.leftArrow) return key.shift ? "step-back" : "seek-back";
+  if (key.rightArrow) return key.shift ? "step-forward" : "seek-forward";
+  if (input === "j") return "jump-back";
+  if (input === "l" && key.shift) return "jump-forward"; // plain l opens the log here
+  if (key.upArrow) return "volume-up";
+  if (key.downArrow) return "volume-down";
+  if (input === "m") return "mute";
+  if (input === "<" || input === ",") return "slower";
+  if (input === ">" || input === ".") return "faster";
+  if (key.escape || key.backspace) return "back";
+  return null;
+}
+
+const HINT = [
+  "space play/pause · ←→ 5 s (shift 1 s) · ↑↓ volume · m mute · < > speed · esc back",
+  SHORTCUTS.map((s) => `${s.key} ${s.label}`).join(" · "),
+].join("\n");
 
 function Run({ bin }: { bin: string }) {
   const [status, push] = useReducer(fold, initialStatus);
@@ -66,6 +85,8 @@ function Run({ bin }: { bin: string }) {
   };
   useInput((input, key) => {
     if (key.ctrl && input === "c") return ctx.stop();
+    const player = playerKey(input, key);
+    if (player && child.current) return sys.sendKey(child.current, player);
     SHORTCUTS.find((s) => s.key === input)?.run(ctx);
   });
   return <Dashboard status={status} hint={HINT} />;

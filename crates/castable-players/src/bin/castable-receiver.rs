@@ -9,6 +9,7 @@
 //! RUST_LOG=debug castable-receiver                    # every request and poll
 //! castable-receiver --log json                        # one JSON object per line
 //! castable-receiver --report                          # a report to attach to an issue
+//! castable-receiver --control stdin                   # player keys, one per line ("seek-back")
 //! ```
 //!
 //! Every run also writes a detailed log (player output included) to
@@ -28,7 +29,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 
 const USAGE: &str = "castable-receiver [--name NAME] [--player NAME|'COMMAND {url}'|log] [--port PORT]
                   [--log pretty|json] [--log-file PATH | --no-log-file] [--config PATH]
-                  [--players [--json]] [--print-config-path] [--report [PATH]]";
+                  [--players [--json]] [--print-config-path] [--report [PATH]] [--control stdin]";
 
 /// The chosen player: one from the registry, or none (log only).
 enum Backend {
@@ -69,6 +70,8 @@ struct Flags {
     log_file: Option<PathBuf>,
     /// `--report [PATH]`: write a report and exit.
     report: Option<Option<PathBuf>>,
+    /// `--control stdin`: read player keys (`castable_core::keys`), one name per line.
+    control_stdin: bool,
 }
 
 /// Prints the error with its code ("E703 config/player_unknown: …") and exits.
@@ -123,6 +126,10 @@ fn flags() -> Flags {
             // For the setup wizard: where settings live on this OS, so it never guesses.
             "--print-config-path" => f.print_config_path = true,
             "--json" => f.json = true,
+            "--control" => match value().as_str() {
+                "stdin" => f.control_stdin = true,
+                other => fail(bad_arg(format!("--control takes stdin, not {other}"))),
+            },
             "-h" | "--help" => {
                 println!("{USAGE}");
                 std::process::exit(0);
@@ -194,7 +201,16 @@ fn pick(
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    let Flags { settings, config, list: show_list, json, print_config_path, log_file, report: report_to } = flags();
+    let Flags {
+        settings,
+        config,
+        list: show_list,
+        json,
+        print_config_path,
+        log_file,
+        report: report_to,
+        control_stdin,
+    } = flags();
     if print_config_path {
         println!("{}", config.or_else(settings_file).map(|p| p.display().to_string()).unwrap_or_default());
         return Ok(());
@@ -275,9 +291,26 @@ async fn main() -> std::io::Result<()> {
         println!("\n  \"{name}\" is ready. Open a cast app on a phone on the same Wi-Fi and pick it.\n");
     }
 
+    if control_stdin {
+        tokio::spawn(keys_from_stdin(rx.handle.clone()));
+    }
     castable_net::run(rx, backend, async {
         let _ = tokio::signal::ctrl_c().await;
     })
     .await;
     Ok(())
+}
+
+/// `--control stdin`: each line names a player key (`play-pause`, `seek-back`,
+/// `volume-up`, ... see `castable_core::keys`), for a front end such as the
+/// CLI's status screen. The receiver acts on what it shows now.
+async fn keys_from_stdin(handle: Handle) {
+    use tokio::io::AsyncBufReadExt;
+    let mut lines = tokio::io::BufReader::new(tokio::io::stdin()).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        match castable_net::PlayerKey::parse(&line) {
+            Some(key) => handle.key(key),
+            None => tracing::warn!(line = %line.trim(), "not a player key"),
+        }
+    }
 }

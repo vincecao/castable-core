@@ -3,7 +3,7 @@
 
 use crate::gena::{Delivery, SubscribeRequest, Subscriptions};
 use castable_core::{
-    Action, ErrorCode, PlayerCommand, PlayerEvent, Renderer, Reply, ScreenAction, ScreenCommand, Service,
+    Action, ErrorCode, PlayerCommand, PlayerEvent, PlayerKey, Renderer, Reply, ScreenAction, ScreenCommand, Service,
     TransportState, UpnpError,
 };
 use std::sync::Arc;
@@ -24,6 +24,8 @@ pub enum Msg {
     },
     Player(PlayerEvent),
     Screen(ScreenCommand),
+    /// A player key, turned into a press on what's shown now.
+    Key(PlayerKey),
     Subscribe {
         service: Service,
         req: SubscribeRequest,
@@ -144,6 +146,13 @@ impl Actor {
                 }
             }
             Msg::SleepTimerEnded { .. } => {} // replaced or cancelled
+            Msg::Key(key) => {
+                let gen = self.renderer.session().cast().map_or(0, |c| c.gen.0);
+                match self.renderer.key_action(key) {
+                    Some(command) => self.handle(Msg::Screen(ScreenCommand { gen: castable_core::Gen(gen), command })),
+                    None => tracing::debug!(key = ?key, "key does nothing now"),
+                }
+            }
             Msg::Screen(press) => {
                 let (command, gen) = (press.command.kind(), press.gen.0);
                 tracing::info!(command, gen, "screen press");

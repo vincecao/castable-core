@@ -127,6 +127,14 @@ the one input that needs a clock, so `castable-net`'s actor keeps it: `SetSleepT
 it ends, a timer task posts back to the actor, and at the end the current cast is paused (not
 stopped: the position stays). A newer timer, or `minutes: null`, replaces it.
 
+**Player keys** (`keys.rs`): one table for every screen. `PlayerKey` names a key (`play-pause`,
+`seek-back` 5 s, `step-back` 1 s, `jump-back` 10 s and their `-forward`s, `volume-up`/`-down` ±5,
+`mute`, `slower`/`faster` through `SPEEDS`, `back`), and `Renderer::key_action` turns it into a
+`ScreenAction` for what is shown now (nothing when it can't apply: a seek on live media, the
+slowest speed). The apps' UI builds the same actions itself, from the same numbers, because it shows
+them ahead of the view; screens that only send keys use `Handle::key`. The CLI's status screen
+does, through `castable-receiver --control stdin` (one key name per line).
+
 The transitions are pure functions, `Phase::on_sender(self, cmd) -> (Phase, Result<Vec<PlayerCommand>, UpnpError>)`
 and `Phase::on_player(self, ev) -> (Phase, Vec<PlayerCommand>)`. A refusal returns the phase
 unchanged, so there is no hand-written rollback.

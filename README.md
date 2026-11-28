@@ -39,6 +39,8 @@ pnpm castable            # start (or set up, the first time)
 pnpm castable setup      # change name, player or port
 pnpm castable start      # live status: what's playing, from which phone, resolution, codecs, bitrate,
                          # position; q stop · l open the log · r write a report
+                         # player keys: space play/pause · ←→ 5 s (shift 1 s) · J / L 10 s
+                         # ↑↓ volume · m mute · < > speed · esc back to waiting
 pnpm castable players    # which players this computer has
 ```
 

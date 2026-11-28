@@ -22,7 +22,7 @@ mod ssdp;
 
 pub use castable_core::{
     AudioInfo, CastError, DeviceInfo, ErrorCategory, ErrorCode, Gen, MediaDescriptor, MediaInfo, MediaTrack,
-    PlayerCommand, PlayerEvent, ScreenAction, ScreenCommand, SenderCommand, TrackKind, VideoInfo,
+    PlayerCommand, PlayerEvent, PlayerKey, ScreenAction, ScreenCommand, SenderCommand, TrackKind, VideoInfo,
 };
 pub use player::{run, Control, Player};
 
@@ -91,6 +91,12 @@ impl Handle {
     /// A press on the receiver's own screen (a button, a TV remote, a key).
     pub fn screen_command(&self, press: ScreenCommand) {
         let _ = self.actor.send(actor::Msg::Screen(press));
+    }
+
+    /// A player key (`castable_core::keys`), acted on with what's shown now:
+    /// for screens that send keys rather than build presses (the CLI).
+    pub fn key(&self, key: PlayerKey) {
+        let _ = self.actor.send(actor::Msg::Key(key));
     }
 
     /// Stops the servers and sends SSDP byebye. Waits briefly for the byebye.
