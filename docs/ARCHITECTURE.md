@@ -116,9 +116,16 @@ Inputs come from two sides and produce **`PlayerCommand`s** for whoever plays th
 | Input | Type | Comes from |
 | --- | --- | --- |
 | Sender commands | `SenderCommand` (`SetUri`, `Play`, `Pause`, `Stop`, `Seek`) | A phone, via SOAP. Volume and mute skip the session: the renderer turns them straight into `SetVolume` / `SetMuted` |
-| Screen presses | `ScreenCommand { gen, command }` | The receiver's own screen, remote or keyboard. `gen` is the cast the screen showed; a press on a replaced cast is dropped |
-| Player events | `PlayerEvent` (`Loaded`, `LoadFailed`, `Progress`, `Ended`, `Closed`, `Info`) — each tagged with a `Gen` | The player. `Closed`: it went away (process exited, window closed), so nothing is loaded. `Info`: what it found out about the media (`MediaInfo`: resolution, codecs, fps, bitrates, HDR, audio format, container, hardware decoder); merged into the cast and shown in the loaded view |
-| Output | `PlayerCommand` (`Load{gen,media}`, `Play`, `Pause`, `Stop`, `Seek`, `SetVolume`, `SetMuted`) | → the player |
+| Screen presses | `ScreenCommand { gen, command: ScreenAction }` | The receiver's own screen, remote or keyboard. `gen` is the cast the screen showed; a press on a replaced cast is dropped. `ScreenAction` is what a phone can ask (`Play`, `Pause`, `Stop`, `Seek`, handled exactly as a phone's) plus the screen's own: `Close` (the back button: back to `Idle`, stopping the player), `SetRate` (within `RATES`, 0.25–4), `SelectTrack { kind, id }`, and three that aren't the cast's: `SetVolume` / `SetMuted` (the renderer's mixer, as a phone's RenderingControl) and `SetSleepTimer { minutes }` (the receiver's clock, below) |
+| Player events | `PlayerEvent` (`Loaded`, `LoadFailed`, `Progress`, `Ended`, `Closed`, `Info`, `Tracks`) — each tagged with a `Gen` | The player. `Closed`: it went away (process exited, window closed), so nothing is loaded. `Info`: what it found out about the media (`MediaInfo`: resolution, codecs, fps, bitrates, HDR, audio format, container, decoder: a hardware one or `software`); merged into the cast and shown in the loaded view. `Tracks`: the audio, video and subtitle tracks (`MediaTrack`, ids are the player's own), selected ones marked |
+| Output | `PlayerCommand` (`Load{gen,media}`, `Play`, `Pause`, `Stop`, `Seek`, `SetVolume`, `SetMuted`, `SetRate`, `SelectTrack`) | → the player |
+
+A cast carries its speed (`rate`, 1 on every new cast) and its `tracks`; a `SelectTrack` marks the
+choice at once (the player's next `Tracks` confirms it). The screen draws `Renderer::view()`: the
+session's view plus the receiver-wide `volume`, `muted` and `sleepEndsAtMs`. The sleep timer is
+the one input that needs a clock, so `castable-net`'s actor keeps it: `SetSleepTimer` stores when
+it ends, a timer task posts back to the actor, and at the end the current cast is paused (not
+stopped: the position stays). A newer timer, or `minutes: null`, replaces it.
 
 The transitions are pure functions, `Phase::on_sender(self, cmd) -> (Phase, Result<Vec<PlayerCommand>, UpnpError>)`
 and `Phase::on_player(self, ev) -> (Phase, Vec<PlayerCommand>)`. A refusal returns the phase

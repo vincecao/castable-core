@@ -6,7 +6,9 @@
 //! events, errors and media info as an external mpv.
 
 use crate::diagnose::{classify, Tail};
-use castable_net::{CastError, ErrorCode, Gen, Handle, MediaDescriptor, MediaInfo, PlayerCommand, PlayerEvent};
+use castable_net::{
+    CastError, ErrorCode, Gen, Handle, MediaDescriptor, MediaInfo, MediaTrack, PlayerCommand, PlayerEvent, TrackKind,
+};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -21,6 +23,21 @@ pub fn encode(ctl: &PlayerCommand) -> Vec<String> {
         PlayerCommand::Seek { to } => vec![format!(r#"{{"command":["seek",{},"absolute"]}}"#, to.as_secs_f64())],
         PlayerCommand::SetVolume { volume: v } => vec![set("volume", &v.to_string())],
         PlayerCommand::SetMuted { muted: m } => vec![set("mute", &m.to_string())],
+        PlayerCommand::SetRate { rate } => vec![set("speed", &rate.to_string())],
+        PlayerCommand::SelectTrack { kind, id } => {
+            let prop = match kind {
+                TrackKind::Audio => "aid",
+                TrackKind::Video => "vid",
+                TrackKind::Subtitle => "sid",
+            };
+            // None: subtitles off; video back to mpv's own choice.
+            let value = match (id, kind) {
+                (Some(id), _) => serde_json::Value::String(id.clone()),
+                (None, TrackKind::Subtitle) => "no".into(),
+                (None, _) => "auto".into(),
+            };
+            vec![serde_json::json!({ "command": ["set_property", prop, value] }).to_string()]
+        }
         PlayerCommand::Load { .. } => vec![], // a load starts a new player instead
     }
 }
@@ -40,6 +57,7 @@ pub fn load(media: &MediaDescriptor) -> Vec<String> {
         .collect();
     vec![
         set("pause", true.into()),
+        set("speed", 1.into()),
         set("user-agent", header("user-agent").unwrap_or("libmpv").into()),
         set("referrer", header("referer").unwrap_or("").into()),
         set("http-header-fields", fields.into()),
@@ -107,7 +125,9 @@ pub async fn session_from(
     };
     let (read, mut write) = tokio::io::split(stream);
     let mut lines = BufReader::new(read).lines();
-    for (id, name) in [(1, "duration"), (2, "time-pos")].into_iter().chain(INFO_PROPERTIES.iter().copied()) {
+    for (id, name) in
+        [(1, "duration"), (2, "time-pos"), (3, "track-list")].into_iter().chain(INFO_PROPERTIES.iter().copied())
+    {
         let watch = format!(r#"{{"command":["observe_property",{id},"{name}"]}}"#);
         let _ = write.write_all(format!("{watch}\n").as_bytes()).await;
     }
@@ -206,7 +226,8 @@ impl InfoTracker {
             "container-fps" => video.fps = d.as_f64().filter(|f| *f > 0.0),
             "video-bitrate" => video.bitrate_bps = bps(),
             "file-format" => self.now.container = text().map(|f| container(&f)),
-            "hwdec-current" => self.now.decoder = text().filter(|h| h != "no"),
+            // "no": FFmpeg decodes in software.
+            "hwdec-current" => self.now.decoder = text().map(|h| if h == "no" { "software".into() } else { h }),
             "hls-bitrate" => self.now.bitrate_bps = bps(),
             _ => {
                 let audio = self.now.audio.get_or_insert_with(Default::default);
@@ -254,6 +275,34 @@ fn container(file_format: &str) -> String {
     }
 }
 
+/// mpv's `track-list` as the core's tracks (its ids are what `aid`/`vid`/`sid` take).
+fn tracks(list: &[serde_json::Value]) -> Vec<MediaTrack> {
+    list.iter()
+        .filter_map(|t| {
+            let kind = match t["type"].as_str()? {
+                "audio" => TrackKind::Audio,
+                "video" if !t["albumart"].as_bool().unwrap_or(false) => TrackKind::Video,
+                "sub" => TrackKind::Subtitle,
+                _ => return None,
+            };
+            let text = |k: &str| t[k].as_str().filter(|s| !s.is_empty()).map(str::to_owned);
+            let num = |k: &str| t[k].as_u64().filter(|n| *n > 0);
+            Some(MediaTrack {
+                id: t["id"].as_i64()?.to_string(),
+                kind,
+                label: text("title"),
+                lang: text("lang"),
+                codec: text("codec"),
+                width: num("demux-w").map(|n| n as u32),
+                height: num("demux-h").map(|n| n as u32),
+                bitrate_bps: num("demux-bitrate").or_else(|| num("hls-bitrate")),
+                channels: num("demux-channel-count").map(|n| n as u32),
+                selected: t["selected"].as_bool().unwrap_or(false),
+            })
+        })
+        .collect()
+}
+
 /// Turns one mpv message into an event, if it is one.
 fn read_event(
     gen: Gen,
@@ -276,6 +325,9 @@ fn read_event(
             let position = secs(&msg["data"])?;
             *last_progress = Instant::now();
             Some(PlayerEvent::Progress { gen, position, duration: *duration })
+        }
+        (Some("property-change"), Some("track-list")) => {
+            Some(PlayerEvent::Tracks { gen, tracks: tracks(msg["data"].as_array()?) })
         }
         (Some("end-file"), _) => match msg["reason"].as_str() {
             Some("eof") => Some(PlayerEvent::Ended { gen }),
@@ -320,6 +372,46 @@ mod tests {
     }
 
     #[test]
+    fn tracks_come_from_the_track_list() {
+        let (mut loaded, mut duration, mut last) = (true, None, Instant::now());
+        let list = json!([
+            {"id":1,"type":"video","codec":"hevc","demux-w":1920,"demux-h":1080,"selected":true},
+            {"id":1,"type":"audio","lang":"eng","title":"English","codec":"aac","demux-channel-count":6,"selected":true},
+            {"id":2,"type":"audio","lang":"fre","codec":"ac3","demux-channel-count":2,"selected":false},
+            {"id":1,"type":"sub","lang":"eng","codec":"subrip","selected":false},
+            {"id":2,"type":"video","albumart":true,"codec":"mjpeg"}
+        ]);
+        let msg = json!({"event":"property-change","name":"track-list","data":list});
+        let Some(PlayerEvent::Tracks { tracks, .. }) = read_event(Gen(1), &msg, &mut loaded, &mut duration, &mut last)
+        else {
+            panic!("no tracks event")
+        };
+        let summary: Vec<_> = tracks.iter().map(|t| (t.kind, t.id.as_str(), t.selected)).collect();
+        assert_eq!(
+            summary,
+            [
+                (TrackKind::Video, "1", true),
+                (TrackKind::Audio, "1", true),
+                (TrackKind::Audio, "2", false),
+                (TrackKind::Subtitle, "1", false)
+            ]
+        );
+        assert_eq!(
+            (tracks[0].height, tracks[1].channels, tracks[1].label.as_deref()),
+            (Some(1080), Some(6), Some("English"))
+        );
+    }
+
+    #[test]
+    fn speed_and_tracks_are_properties() {
+        assert_eq!(encode(&PlayerCommand::SetRate { rate: 1.5 }), [r#"{"command":["set_property","speed",1.5]}"#]);
+        let audio = PlayerCommand::SelectTrack { kind: TrackKind::Audio, id: Some("2".into()) };
+        assert_eq!(encode(&audio), [r#"{"command":["set_property","aid","2"]}"#]);
+        let subs_off = PlayerCommand::SelectTrack { kind: TrackKind::Subtitle, id: None };
+        assert_eq!(encode(&subs_off), [r#"{"command":["set_property","sid","no"]}"#]);
+    }
+
+    #[test]
     fn events_follow_mpv() {
         let (mut loaded, mut duration, mut last) = (false, None, Instant::now() - Duration::from_secs(5));
         let mut read = |m| read_event(Gen(1), &m, &mut loaded, &mut duration, &mut last);
@@ -344,11 +436,12 @@ mod tests {
         media.headers.insert("X-Token".into(), "abc".into());
         let msgs: Vec<serde_json::Value> = load(&media).iter().map(|m| serde_json::from_str(m).unwrap()).collect();
         assert_eq!(msgs[0], json!({"command":["set_property","pause",true]}));
-        assert_eq!(msgs[1], json!({"command":["set_property","user-agent","libmpv"]}));
-        assert_eq!(msgs[2], json!({"command":["set_property","referrer","https://media.example.com/"]}));
-        assert_eq!(msgs[3], json!({"command":["set_property","http-header-fields",["X-Token: abc"]]}));
-        assert_eq!(msgs[4], json!({"command":["set_property","force-media-title","Episode 1"]}));
-        assert_eq!(msgs[5], json!({"command":["loadfile","https://media.example.com/e1.m3u8","replace"]}));
+        assert_eq!(msgs[1], json!({"command":["set_property","speed",1]}));
+        assert_eq!(msgs[2], json!({"command":["set_property","user-agent","libmpv"]}));
+        assert_eq!(msgs[3], json!({"command":["set_property","referrer","https://media.example.com/"]}));
+        assert_eq!(msgs[4], json!({"command":["set_property","http-header-fields",["X-Token: abc"]]}));
+        assert_eq!(msgs[5], json!({"command":["set_property","force-media-title","Episode 1"]}));
+        assert_eq!(msgs[6], json!({"command":["loadfile","https://media.example.com/e1.m3u8","replace"]}));
     }
 
     #[test]

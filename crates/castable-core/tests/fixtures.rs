@@ -8,33 +8,53 @@ use castable_core::*;
 use std::path::PathBuf;
 use std::time::Duration;
 
+/// A screen view: the session's, with receiver-wide state (volume, sleep timer).
+fn screen(s: &Session, volume: u8, muted: bool, sleep_ends_at_ms: Option<u64>) -> serde_json::Value {
+    serde_json::to_value(ReceiverView { session: s.view(), volume, muted, sleep_ends_at_ms }).unwrap()
+}
+
 fn views() -> String {
     let mut s = Session::new();
-    let mut out = vec![serde_json::to_value(s.view()).unwrap()];
+    let mut out = vec![screen(&s, 50, false, None)];
     let mut media = MediaDescriptor::video("http://192.0.2.10/e1.mp4");
     media.title = Some("Episode 1".into());
     media.mime = Some("video/mp4".into());
-    let mut step = |s: &mut Session, input: Input| {
+    let step = |s: &mut Session, out: &mut Vec<serde_json::Value>, input: Input| {
         s.handle(input).unwrap();
-        out.push(serde_json::to_value(s.view()).unwrap());
+        out.push(screen(s, 50, false, None));
     };
-    step(&mut s, Input::Sender(SenderCommand::SetUri(media)));
-    step(&mut s, Input::Sender(SenderCommand::Play));
-    step(&mut s, Input::Player(PlayerEvent::Loaded { gen: Gen(1), duration: Some(Duration::from_secs(1500)) }));
-    // What the player found out; not a view of its own (keeps the view numbers).
-    s.handle(Input::Player(PlayerEvent::Info { gen: Gen(1), info: Box::new(sample_info()) })).unwrap();
+    step(&mut s, &mut out, Input::Sender(SenderCommand::SetUri(media)));
+    step(&mut s, &mut out, Input::Sender(SenderCommand::Play));
     step(
         &mut s,
+        &mut out,
+        Input::Player(PlayerEvent::Loaded { gen: Gen(1), duration: Some(Duration::from_secs(1500)) }),
+    );
+    // What the player found out; not a view of its own (keeps the view numbers).
+    s.handle(Input::Player(PlayerEvent::Info { gen: Gen(1), info: Box::new(sample_info()) })).unwrap();
+    s.handle(Input::Player(PlayerEvent::Tracks { gen: Gen(1), tracks: sample_tracks() })).unwrap();
+    step(
+        &mut s,
+        &mut out,
         Input::Player(PlayerEvent::Progress {
             gen: Gen(1),
             position: Duration::from_secs(724),
             duration: Some(Duration::from_secs(1500)),
         }),
     );
-    step(&mut s, Input::Sender(SenderCommand::Pause));
-    step(&mut s, Input::Sender(SenderCommand::Stop));
+    step(&mut s, &mut out, Input::Screen(ScreenCommand { gen: Gen(1), command: ScreenAction::SetRate { rate: 1.5 } }));
+    step(&mut s, &mut out, Input::Sender(SenderCommand::Pause));
+    // Paused at night: the volume turned down and a sleep timer on (2026-01-01 00:30 UTC).
+    s.handle(Input::Screen(ScreenCommand {
+        gen: Gen(1),
+        command: ScreenAction::SelectTrack { kind: TrackKind::Audio, id: Some("2".into()) },
+    }))
+    .unwrap();
+    out.push(screen(&s, 20, false, Some(1_767_227_400_000)));
+    step(&mut s, &mut out, Input::Sender(SenderCommand::Stop));
     step(
         &mut s,
+        &mut out,
         Input::Player(PlayerEvent::LoadFailed {
             gen: Gen(1),
             error: CastError::with_detail(ErrorCode::Network, "network error"),
@@ -44,9 +64,9 @@ fn views() -> String {
     let mut live = MediaDescriptor::video("http://192.0.2.10/news.m3u8");
     live.title = Some("Evening news".into());
     live.delivery = Delivery::Live;
-    step(&mut s, Input::Sender(SenderCommand::SetUri(live)));
-    step(&mut s, Input::Sender(SenderCommand::Play));
-    step(&mut s, Input::Player(PlayerEvent::Loaded { gen: Gen(2), duration: None }));
+    step(&mut s, &mut out, Input::Sender(SenderCommand::SetUri(live)));
+    step(&mut s, &mut out, Input::Sender(SenderCommand::Play));
+    step(&mut s, &mut out, Input::Player(PlayerEvent::Loaded { gen: Gen(2), duration: None }));
     serde_json::to_string_pretty(&out).unwrap()
 }
 
@@ -69,6 +89,50 @@ fn sample_info() -> MediaInfo {
             bitrate_bps: None,
         }),
     }
+}
+
+fn sample_tracks() -> Vec<MediaTrack> {
+    let track = |id: &str, kind, selected| MediaTrack {
+        id: id.into(),
+        kind,
+        label: None,
+        lang: None,
+        codec: None,
+        width: None,
+        height: None,
+        bitrate_bps: None,
+        channels: None,
+        selected,
+    };
+    vec![
+        MediaTrack {
+            codec: Some("h264".into()),
+            width: Some(1920),
+            height: Some(1080),
+            ..track("1", TrackKind::Video, true)
+        },
+        MediaTrack {
+            codec: Some("h264".into()),
+            width: Some(1280),
+            height: Some(720),
+            ..track("2", TrackKind::Video, false)
+        },
+        MediaTrack {
+            label: Some("English".into()),
+            lang: Some("en".into()),
+            codec: Some("aac".into()),
+            channels: Some(2),
+            ..track("1", TrackKind::Audio, true)
+        },
+        MediaTrack {
+            label: Some("English (commentary)".into()),
+            lang: Some("en".into()),
+            codec: Some("ac3".into()),
+            channels: Some(6),
+            ..track("2", TrackKind::Audio, false)
+        },
+        MediaTrack { lang: Some("en".into()), codec: Some("subrip".into()), ..track("1", TrackKind::Subtitle, false) },
+    ]
 }
 
 fn root() -> PathBuf {
@@ -94,6 +158,9 @@ fn protocol() -> String {
         PlayerCommand::Seek { to: Duration::from_millis(30_500) },
         PlayerCommand::SetVolume { volume: 70 },
         PlayerCommand::SetMuted { muted: true },
+        PlayerCommand::SetRate { rate: 1.5 },
+        PlayerCommand::SelectTrack { kind: TrackKind::Audio, id: Some("2".into()) },
+        PlayerCommand::SelectTrack { kind: TrackKind::Subtitle, id: None },
     ];
     let events = vec![
         PlayerEvent::Loaded { gen: Gen(1), duration: Some(Duration::from_secs(90)) },
@@ -111,6 +178,7 @@ fn protocol() -> String {
         PlayerEvent::Ended { gen: Gen(1) },
         PlayerEvent::Closed { gen: Gen(1) },
         PlayerEvent::Info { gen: Gen(1), info: Box::new(sample_info()) },
+        PlayerEvent::Tracks { gen: Gen(1), tracks: sample_tracks() },
     ];
     let sender = vec![
         SenderCommand::SetUri(media),
@@ -120,8 +188,18 @@ fn protocol() -> String {
         SenderCommand::Seek { to: Duration::from_secs(10) },
     ];
     let screen = vec![
-        ScreenCommand { gen: Gen(1), command: SenderCommand::Pause },
-        ScreenCommand { gen: Gen(2), command: SenderCommand::Seek { to: Duration::from_secs(40) } },
+        ScreenCommand { gen: Gen(1), command: ScreenAction::Pause },
+        ScreenCommand { gen: Gen(2), command: ScreenAction::Seek { to: Duration::from_secs(40) } },
+        ScreenCommand { gen: Gen(1), command: ScreenAction::Close },
+        ScreenCommand { gen: Gen(1), command: ScreenAction::SetVolume { volume: 35 } },
+        ScreenCommand { gen: Gen(1), command: ScreenAction::SetMuted { muted: true } },
+        ScreenCommand { gen: Gen(1), command: ScreenAction::SetRate { rate: 1.25 } },
+        ScreenCommand {
+            gen: Gen(1),
+            command: ScreenAction::SelectTrack { kind: TrackKind::Video, id: Some("2".into()) },
+        },
+        ScreenCommand { gen: Gen(1), command: ScreenAction::SetSleepTimer { minutes: Some(30) } },
+        ScreenCommand { gen: Gen(1), command: ScreenAction::SetSleepTimer { minutes: None } },
     ];
     // Every value must also read back as itself.
     for c in &screen {

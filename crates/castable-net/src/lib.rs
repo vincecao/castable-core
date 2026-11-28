@@ -21,8 +21,8 @@ pub mod player;
 mod ssdp;
 
 pub use castable_core::{
-    AudioInfo, CastError, DeviceInfo, ErrorCategory, ErrorCode, Gen, MediaDescriptor, MediaInfo, PlayerCommand,
-    PlayerEvent, ScreenCommand, SenderCommand, VideoInfo,
+    AudioInfo, CastError, DeviceInfo, ErrorCategory, ErrorCode, Gen, MediaDescriptor, MediaInfo, MediaTrack,
+    PlayerCommand, PlayerEvent, ScreenAction, ScreenCommand, SenderCommand, TrackKind, VideoInfo,
 };
 pub use player::{run, Control, Player};
 

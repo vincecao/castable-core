@@ -16,7 +16,9 @@ pub fn encode(ctl: &PlayerCommand) -> Vec<String> {
         // VLC's scale: 256 = 100%.
         PlayerCommand::SetVolume { volume: v } => vec![format!("volume&val={}", u32::from(*v) * 256 / 100)],
         PlayerCommand::SetMuted { .. } => vec![], // the web remote has no mute
-        PlayerCommand::Load { .. } => vec![],     // a load starts a new player instead
+        PlayerCommand::SetRate { rate } => vec![format!("rate&val={rate}")],
+        PlayerCommand::SelectTrack { .. } => vec![], // the web remote can't pick tracks
+        PlayerCommand::Load { .. } => vec![],        // a load starts a new player instead
     }
 }
 

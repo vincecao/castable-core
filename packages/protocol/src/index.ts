@@ -6,7 +6,7 @@
 //   core ──ReceiverView──▶ UI          (what to show)
 //   core ──PlayerCommand──▶ player     (what to play)
 //   player ──PlayerEvent──▶ core       (what happened)
-//   UI ──ScreenCommand──▶ core         (remote/keyboard: play, pause, seek, on cast `gen`)
+//   UI ──ScreenCommand──▶ core         (remote/keyboard: transport, back, volume, speed, tracks, sleep; on cast `gen`)
 
 export type MediaKind = "video" | "audio" | "image";
 
@@ -41,12 +41,40 @@ export type TransportState =
   | "PLAYING"
   | "PAUSED_PLAYBACK";
 
+/** What a track carries. Mirrors `TrackKind`. */
+export type TrackKind = "audio" | "video" | "subtitle";
+
 /**
- * The receiver's session as the UI sees it: a discriminated union on `phase`,
- * serialized by `Session::view()` in crates/castable-core/src/session.rs. The core
- * computes `transportState`, so the UI never re-derives it.
+ * One track the player found. `id` is the player's own: send it back in
+ * `selectTrack`. Mirrors `MediaTrack` in crates/castable-core/src/tracks.rs.
  */
-export type ReceiverView = { transportState: TransportState } & (
+export interface MediaTrack {
+  id: string;
+  kind: TrackKind;
+  label?: string;
+  lang?: string;
+  codec?: string;
+  width?: number;
+  height?: number;
+  bitrateBps?: number;
+  channels?: number;
+  selected: boolean;
+}
+
+/**
+ * The receiver's screen as the UI sees it: a discriminated union on `phase`,
+ * serialized by `Renderer::view()` (session state from `Session::view()` in
+ * crates/castable-core/src/session.rs, plus the receiver's volume and sleep
+ * timer). The core computes `transportState`, so the UI never re-derives it.
+ */
+export type ReceiverView = {
+  transportState: TransportState;
+  /** 0–100. */
+  volume: number;
+  muted: boolean;
+  /** When the sleep timer pauses playback (Unix ms); absent when off. */
+  sleepEndsAtMs?: number;
+} & (
   | { phase: "idle" }
   | { phase: "loading"; gen: Gen; title: string; media: MediaDescriptor; playWhenReady: boolean }
   | {
@@ -61,6 +89,10 @@ export type ReceiverView = { transportState: TransportState } & (
       info?: MediaInfo;
       /** A short badge from `info`: "1080p", "4K · HDR10". */
       qualityLabel?: string;
+      /** Playback speed; 1 is normal. */
+      rate: number;
+      /** The tracks the player found; absent until it reports them. */
+      tracks?: MediaTrack[];
     }
   | { phase: "unloaded"; gen: Gen; title: string; media: MediaDescriptor; error?: CastError }
 );
@@ -76,7 +108,10 @@ export type PlayerCommand =
   | { type: "stop" }
   | { type: "seek"; toSecs: number }
   | { type: "setVolume"; volume: number }
-  | { type: "setMuted"; muted: boolean };
+  | { type: "setMuted"; muted: boolean }
+  | { type: "setRate"; rate: number }
+  /** `id: null`: subtitles off, or video back on automatic. */
+  | { type: "selectTrack"; kind: TrackKind; id: string | null };
 
 /** What the player reports back. Mirrors `PlayerEvent`. */
 export type PlayerEvent =
@@ -87,7 +122,9 @@ export type PlayerEvent =
   /** The player went away (its process exited, its window was closed): nothing is loaded. */
   | { type: "closed"; gen: Gen }
   /** What the player found out about the media; may come again as it learns more. */
-  | { type: "info"; gen: Gen; info: MediaInfo };
+  | { type: "info"; gen: Gen; info: MediaInfo }
+  /** The tracks in the media, selected ones marked; again whenever they change. */
+  | { type: "tracks"; gen: Gen; tracks: MediaTrack[] };
 
 /** Commands from a sender (a phone), or inside a `ScreenCommand`. Mirrors `SenderCommand`. */
 export type SenderCommand =
@@ -97,6 +134,29 @@ export type SenderCommand =
   | { type: "stop" }
   | { type: "seek"; toSecs: number };
 
+/** The speeds a screen may set (the core refuses others). Mirrors `RATES`. */
+export const RATE_RANGE = { min: 0.25, max: 4 } as const;
+
+/**
+ * What a press on the receiver's own screen asks for: what a phone can ask,
+ * plus what only the screen offers. Mirrors `ScreenAction`.
+ */
+export type ScreenAction =
+  | { type: "play" }
+  | { type: "pause" }
+  | { type: "stop" }
+  | { type: "seek"; toSecs: number }
+  /** The back button: leave the video, back to the waiting screen. */
+  | { type: "close" }
+  /** 0–100. */
+  | { type: "setVolume"; volume: number }
+  | { type: "setMuted"; muted: boolean }
+  | { type: "setRate"; rate: number }
+  /** `id: null`: subtitles off, or video back on automatic. */
+  | { type: "selectTrack"; kind: TrackKind; id: string | null }
+  /** Pause after this many minutes; `null` cancels. */
+  | { type: "setSleepTimer"; minutes: number | null };
+
 /**
  * A press on the receiver's own screen (a button, a TV remote, a key), made
  * while it showed cast `gen`. The core drops it if that cast has been
@@ -104,7 +164,7 @@ export type SenderCommand =
  */
 export interface ScreenCommand {
   gen: Gen;
-  command: SenderCommand;
+  command: ScreenAction;
 }
 
 /** The error buckets. A code's number starts with its bucket's digit. Mirrors `ErrorCategory`. */
@@ -170,7 +230,7 @@ export interface MediaInfo {
   container?: string;
   /** The whole stream's bitrate (an HLS variant's, say). */
   bitrateBps?: number;
-  /** The hardware decoder in use ("videotoolbox", "d3d11va"). */
+  /** The decoder in use: a hardware one ("videotoolbox", "d3d11va", "mediacodec") or "software". */
   decoder?: string;
   video?: {
     /** "h264", "hevc", "av1", "vp9", ... */

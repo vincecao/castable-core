@@ -190,7 +190,7 @@ async fn the_view_follows_the_cast_and_screen_presses_work() {
 
     rx.handle.player_event(PlayerEvent::Loaded { gen: Gen(1), duration: Some(Duration::from_secs(60)) });
     // A press on the screen, made on cast 1: plays it.
-    rx.handle.screen_command(castable_net::ScreenCommand { gen: Gen(1), command: castable_net::SenderCommand::Play });
+    rx.handle.screen_command(castable_net::ScreenCommand { gen: Gen(1), command: castable_net::ScreenAction::Play });
     assert_eq!(next_command(&mut rx.commands).await, PlayerCommand::Play);
     tokio::time::timeout(Duration::from_secs(2), async {
         while view(&rx)["playback"] != "playing" {

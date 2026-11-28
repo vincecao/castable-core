@@ -6,10 +6,13 @@
 use crate::didl::descriptor_from;
 use crate::error::UpnpError;
 use crate::service::{sink_protocol_info, Service};
-use crate::session::{Input, Phase, Playback, PlayerCommand, PlayerEvent, ScreenCommand, SenderCommand, Session};
+use crate::session::{
+    Input, Phase, Playback, PlayerCommand, PlayerEvent, ScreenAction, ScreenCommand, SenderCommand, Session, View,
+};
 use crate::soap::RawCall;
 use crate::time::{format_hms, parse_hms};
 use crate::xml::escape;
+use serde::Serialize;
 use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -138,12 +141,28 @@ pub struct Renderer {
     metadata: String,
     volume: u8,
     muted: bool,
+    /// When the sleep timer stops playback (Unix ms), as the receiver set it.
+    sleep_ends_at_ms: Option<u64>,
 }
 
 impl Default for Renderer {
     fn default() -> Self {
-        Self { session: Session::new(), metadata: String::new(), volume: 50, muted: false }
+        Self { session: Session::new(), metadata: String::new(), volume: 50, muted: false, sleep_ends_at_ms: None }
     }
+}
+
+/// What the receiver's screen draws: the session's view, plus the
+/// receiver-wide state a screen shows (volume, the sleep timer).
+/// Mirrors `ReceiverView` in `packages/protocol`.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceiverView<'a> {
+    #[serde(flatten)]
+    pub session: View<'a>,
+    pub volume: u8,
+    pub muted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sleep_ends_at_ms: Option<u64>,
 }
 
 impl Renderer {
@@ -157,6 +176,21 @@ impl Renderer {
 
     pub fn volume(&self) -> (u8, bool) {
         (self.volume, self.muted)
+    }
+
+    /// The screen's view (see [`ReceiverView`]).
+    pub fn view(&self) -> ReceiverView<'_> {
+        ReceiverView {
+            session: self.session.view(),
+            volume: self.volume,
+            muted: self.muted,
+            sleep_ends_at_ms: self.sleep_ends_at_ms,
+        }
+    }
+
+    /// The receiver keeps the clock: it says when the sleep timer ends, or that it's off.
+    pub fn set_sleep_timer(&mut self, ends_at_ms: Option<u64>) {
+        self.sleep_ends_at_ms = ends_at_ms;
     }
 
     /// Runs one control action.
@@ -191,7 +225,17 @@ impl Renderer {
     /// A press on the receiver's own screen. Dropped (no change, no error)
     /// if the cast it was made on has been replaced.
     pub fn on_screen(&mut self, press: ScreenCommand) -> Result<Reply, UpnpError> {
-        self.drive(Input::Screen(press))
+        // The volume is the receiver's, not the cast's: it applies whatever is shown.
+        match press.command {
+            ScreenAction::SetVolume { volume } => {
+                let volume = volume.min(100);
+                Ok(self.mixer(PlayerCommand::SetVolume { volume }, volume != self.volume, |r| r.volume = volume))
+            }
+            ScreenAction::SetMuted { muted } => {
+                Ok(self.mixer(PlayerCommand::SetMuted { muted }, muted != self.muted, |r| r.muted = muted))
+            }
+            _ => self.drive(Input::Screen(press)),
+        }
     }
 
     pub fn on_player(&mut self, event: PlayerEvent) -> Reply {
@@ -413,6 +457,18 @@ mod tests {
             }
         }
         assert_eq!(count, 18, "every Action variant is advertised exactly once");
+    }
+
+    #[test]
+    fn the_screen_sets_the_receivers_volume() {
+        let mut r = Renderer::new();
+        let press = |command| ScreenCommand { gen: crate::session::Gen(1), command };
+        let reply = r.on_screen(press(ScreenAction::SetVolume { volume: 120 })).unwrap();
+        assert_eq!(reply.commands, vec![PlayerCommand::SetVolume { volume: 100 }]);
+        assert_eq!(reply.notify, vec![Service::RenderingControl], "phones see the new volume");
+        r.on_screen(press(ScreenAction::SetMuted { muted: true })).unwrap();
+        let view = serde_json::to_value(r.view()).unwrap();
+        assert_eq!((view["volume"].as_u64(), view["muted"].as_bool()), (Some(100), Some(true)));
     }
 
     #[test]

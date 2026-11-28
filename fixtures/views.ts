@@ -3,8 +3,10 @@ import type { ReceiverView } from "../packages/protocol/src/index.ts";
 
 export const views = [
   {
+    "muted": false,
     "phase": "idle",
-    "transportState": "NO_MEDIA_PRESENT"
+    "transportState": "NO_MEDIA_PRESENT",
+    "volume": 50
   },
   {
     "gen": 1,
@@ -17,10 +19,12 @@ export const views = [
       "title": "Episode 1",
       "url": "http://192.0.2.10/e1.mp4"
     },
+    "muted": false,
     "phase": "loading",
     "playWhenReady": false,
     "title": "Episode 1",
-    "transportState": "TRANSITIONING"
+    "transportState": "TRANSITIONING",
+    "volume": 50
   },
   {
     "gen": 1,
@@ -33,10 +37,12 @@ export const views = [
       "title": "Episode 1",
       "url": "http://192.0.2.10/e1.mp4"
     },
+    "muted": false,
     "phase": "loading",
     "playWhenReady": true,
     "title": "Episode 1",
-    "transportState": "TRANSITIONING"
+    "transportState": "TRANSITIONING",
+    "volume": 50
   },
   {
     "durationSecs": 1500.0,
@@ -50,11 +56,14 @@ export const views = [
       "title": "Episode 1",
       "url": "http://192.0.2.10/e1.mp4"
     },
+    "muted": false,
     "phase": "loaded",
     "playback": "playing",
     "positionSecs": 0.0,
+    "rate": 1.0,
     "title": "Episode 1",
-    "transportState": "PLAYING"
+    "transportState": "PLAYING",
+    "volume": 50
   },
   {
     "durationSecs": 1500.0,
@@ -84,12 +93,58 @@ export const views = [
       "title": "Episode 1",
       "url": "http://192.0.2.10/e1.mp4"
     },
+    "muted": false,
     "phase": "loaded",
     "playback": "playing",
     "positionSecs": 724.0,
     "qualityLabel": "1080p",
+    "rate": 1.0,
     "title": "Episode 1",
-    "transportState": "PLAYING"
+    "tracks": [
+      {
+        "codec": "h264",
+        "height": 1080,
+        "id": "1",
+        "kind": "video",
+        "selected": true,
+        "width": 1920
+      },
+      {
+        "codec": "h264",
+        "height": 720,
+        "id": "2",
+        "kind": "video",
+        "selected": false,
+        "width": 1280
+      },
+      {
+        "channels": 2,
+        "codec": "aac",
+        "id": "1",
+        "kind": "audio",
+        "label": "English",
+        "lang": "en",
+        "selected": true
+      },
+      {
+        "channels": 6,
+        "codec": "ac3",
+        "id": "2",
+        "kind": "audio",
+        "label": "English (commentary)",
+        "lang": "en",
+        "selected": false
+      },
+      {
+        "codec": "subrip",
+        "id": "1",
+        "kind": "subtitle",
+        "lang": "en",
+        "selected": false
+      }
+    ],
+    "transportState": "PLAYING",
+    "volume": 50
   },
   {
     "durationSecs": 1500.0,
@@ -119,12 +174,139 @@ export const views = [
       "title": "Episode 1",
       "url": "http://192.0.2.10/e1.mp4"
     },
+    "muted": false,
+    "phase": "loaded",
+    "playback": "playing",
+    "positionSecs": 724.0,
+    "qualityLabel": "1080p",
+    "rate": 1.5,
+    "title": "Episode 1",
+    "tracks": [
+      {
+        "codec": "h264",
+        "height": 1080,
+        "id": "1",
+        "kind": "video",
+        "selected": true,
+        "width": 1920
+      },
+      {
+        "codec": "h264",
+        "height": 720,
+        "id": "2",
+        "kind": "video",
+        "selected": false,
+        "width": 1280
+      },
+      {
+        "channels": 2,
+        "codec": "aac",
+        "id": "1",
+        "kind": "audio",
+        "label": "English",
+        "lang": "en",
+        "selected": true
+      },
+      {
+        "channels": 6,
+        "codec": "ac3",
+        "id": "2",
+        "kind": "audio",
+        "label": "English (commentary)",
+        "lang": "en",
+        "selected": false
+      },
+      {
+        "codec": "subrip",
+        "id": "1",
+        "kind": "subtitle",
+        "lang": "en",
+        "selected": false
+      }
+    ],
+    "transportState": "PLAYING",
+    "volume": 50
+  },
+  {
+    "durationSecs": 1500.0,
+    "gen": 1,
+    "info": {
+      "audio": {
+        "channels": 2,
+        "codec": "aac",
+        "sampleRateHz": 48000
+      },
+      "bitrateBps": 5200000,
+      "container": "hls",
+      "decoder": "videotoolbox",
+      "video": {
+        "codec": "h264",
+        "fps": 23.976,
+        "height": 1080,
+        "width": 1920
+      }
+    },
+    "media": {
+      "delivery": {
+        "type": "onDemand"
+      },
+      "kind": "video",
+      "mime": "video/mp4",
+      "title": "Episode 1",
+      "url": "http://192.0.2.10/e1.mp4"
+    },
+    "muted": false,
     "phase": "loaded",
     "playback": "paused",
     "positionSecs": 724.0,
     "qualityLabel": "1080p",
+    "rate": 1.5,
     "title": "Episode 1",
-    "transportState": "PAUSED_PLAYBACK"
+    "tracks": [
+      {
+        "codec": "h264",
+        "height": 1080,
+        "id": "1",
+        "kind": "video",
+        "selected": true,
+        "width": 1920
+      },
+      {
+        "codec": "h264",
+        "height": 720,
+        "id": "2",
+        "kind": "video",
+        "selected": false,
+        "width": 1280
+      },
+      {
+        "channels": 2,
+        "codec": "aac",
+        "id": "1",
+        "kind": "audio",
+        "label": "English",
+        "lang": "en",
+        "selected": true
+      },
+      {
+        "channels": 6,
+        "codec": "ac3",
+        "id": "2",
+        "kind": "audio",
+        "label": "English (commentary)",
+        "lang": "en",
+        "selected": false
+      },
+      {
+        "codec": "subrip",
+        "id": "1",
+        "kind": "subtitle",
+        "lang": "en",
+        "selected": false
+      }
+    ],
+    "transportState": "PAUSED_PLAYBACK",
+    "volume": 50
   },
   {
     "durationSecs": 1500.0,
@@ -154,12 +336,140 @@ export const views = [
       "title": "Episode 1",
       "url": "http://192.0.2.10/e1.mp4"
     },
+    "muted": false,
+    "phase": "loaded",
+    "playback": "paused",
+    "positionSecs": 724.0,
+    "qualityLabel": "1080p",
+    "rate": 1.5,
+    "sleepEndsAtMs": 1767227400000,
+    "title": "Episode 1",
+    "tracks": [
+      {
+        "codec": "h264",
+        "height": 1080,
+        "id": "1",
+        "kind": "video",
+        "selected": true,
+        "width": 1920
+      },
+      {
+        "codec": "h264",
+        "height": 720,
+        "id": "2",
+        "kind": "video",
+        "selected": false,
+        "width": 1280
+      },
+      {
+        "channels": 2,
+        "codec": "aac",
+        "id": "1",
+        "kind": "audio",
+        "label": "English",
+        "lang": "en",
+        "selected": false
+      },
+      {
+        "channels": 6,
+        "codec": "ac3",
+        "id": "2",
+        "kind": "audio",
+        "label": "English (commentary)",
+        "lang": "en",
+        "selected": true
+      },
+      {
+        "codec": "subrip",
+        "id": "1",
+        "kind": "subtitle",
+        "lang": "en",
+        "selected": false
+      }
+    ],
+    "transportState": "PAUSED_PLAYBACK",
+    "volume": 20
+  },
+  {
+    "durationSecs": 1500.0,
+    "gen": 1,
+    "info": {
+      "audio": {
+        "channels": 2,
+        "codec": "aac",
+        "sampleRateHz": 48000
+      },
+      "bitrateBps": 5200000,
+      "container": "hls",
+      "decoder": "videotoolbox",
+      "video": {
+        "codec": "h264",
+        "fps": 23.976,
+        "height": 1080,
+        "width": 1920
+      }
+    },
+    "media": {
+      "delivery": {
+        "type": "onDemand"
+      },
+      "kind": "video",
+      "mime": "video/mp4",
+      "title": "Episode 1",
+      "url": "http://192.0.2.10/e1.mp4"
+    },
+    "muted": false,
     "phase": "loaded",
     "playback": "stopped",
     "positionSecs": 0.0,
     "qualityLabel": "1080p",
+    "rate": 1.5,
     "title": "Episode 1",
-    "transportState": "STOPPED"
+    "tracks": [
+      {
+        "codec": "h264",
+        "height": 1080,
+        "id": "1",
+        "kind": "video",
+        "selected": true,
+        "width": 1920
+      },
+      {
+        "codec": "h264",
+        "height": 720,
+        "id": "2",
+        "kind": "video",
+        "selected": false,
+        "width": 1280
+      },
+      {
+        "channels": 2,
+        "codec": "aac",
+        "id": "1",
+        "kind": "audio",
+        "label": "English",
+        "lang": "en",
+        "selected": false
+      },
+      {
+        "channels": 6,
+        "codec": "ac3",
+        "id": "2",
+        "kind": "audio",
+        "label": "English (commentary)",
+        "lang": "en",
+        "selected": true
+      },
+      {
+        "codec": "subrip",
+        "id": "1",
+        "kind": "subtitle",
+        "lang": "en",
+        "selected": false
+      }
+    ],
+    "transportState": "STOPPED",
+    "volume": 50
   },
   {
     "error": {
@@ -178,9 +488,11 @@ export const views = [
       "title": "Episode 1",
       "url": "http://192.0.2.10/e1.mp4"
     },
+    "muted": false,
     "phase": "unloaded",
     "title": "Episode 1",
-    "transportState": "STOPPED"
+    "transportState": "STOPPED",
+    "volume": 50
   },
   {
     "gen": 2,
@@ -192,10 +504,12 @@ export const views = [
       "title": "Evening news",
       "url": "http://192.0.2.10/news.m3u8"
     },
+    "muted": false,
     "phase": "loading",
     "playWhenReady": false,
     "title": "Evening news",
-    "transportState": "TRANSITIONING"
+    "transportState": "TRANSITIONING",
+    "volume": 50
   },
   {
     "gen": 2,
@@ -207,10 +521,12 @@ export const views = [
       "title": "Evening news",
       "url": "http://192.0.2.10/news.m3u8"
     },
+    "muted": false,
     "phase": "loading",
     "playWhenReady": true,
     "title": "Evening news",
-    "transportState": "TRANSITIONING"
+    "transportState": "TRANSITIONING",
+    "volume": 50
   },
   {
     "gen": 2,
@@ -222,10 +538,13 @@ export const views = [
       "title": "Evening news",
       "url": "http://192.0.2.10/news.m3u8"
     },
+    "muted": false,
     "phase": "loaded",
     "playback": "playing",
     "positionSecs": 0.0,
+    "rate": 1.0,
     "title": "Evening news",
-    "transportState": "PLAYING"
+    "transportState": "PLAYING",
+    "volume": 50
   }
 ] as const satisfies readonly ReceiverView[];

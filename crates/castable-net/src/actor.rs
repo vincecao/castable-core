@@ -3,7 +3,8 @@
 
 use crate::gena::{Delivery, SubscribeRequest, Subscriptions};
 use castable_core::{
-    Action, ErrorCode, PlayerCommand, PlayerEvent, Renderer, Reply, ScreenCommand, Service, TransportState, UpnpError,
+    Action, ErrorCode, PlayerCommand, PlayerEvent, Renderer, Reply, ScreenAction, ScreenCommand, Service,
+    TransportState, UpnpError,
 };
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -17,11 +18,25 @@ pub type Out = Vec<(&'static str, String)>;
 /// carries its own reply channel, typed for its answer.
 #[derive(Debug)]
 pub enum Msg {
-    Act { action: Action, reply: oneshot::Sender<Result<Out, UpnpError>> },
+    Act {
+        action: Action,
+        reply: oneshot::Sender<Result<Out, UpnpError>>,
+    },
     Player(PlayerEvent),
     Screen(ScreenCommand),
-    Subscribe { service: Service, req: SubscribeRequest, reply: oneshot::Sender<Option<(String, Duration)>> },
-    Unsubscribe { sid: String, reply: oneshot::Sender<bool> },
+    Subscribe {
+        service: Service,
+        req: SubscribeRequest,
+        reply: oneshot::Sender<Option<(String, Duration)>>,
+    },
+    /// A sleep timer ran out; `timer` says which one (a newer one replaces it).
+    SleepTimerEnded {
+        timer: u64,
+    },
+    Unsubscribe {
+        sid: String,
+        reply: oneshot::Sender<bool>,
+    },
 }
 
 pub struct Actor {
@@ -33,6 +48,10 @@ pub struct Actor {
     notifier: mpsc::UnboundedSender<Delivery>,
     /// The current view as JSON, for an app that draws the receiver's screen.
     views: watch::Sender<Arc<str>>,
+    /// To post to itself (the sleep timer's end); weak, so the actor still ends with its senders.
+    me: mpsc::WeakUnboundedSender<Msg>,
+    /// The current sleep timer's number; 0 when none is set.
+    sleep_timer: u64,
 }
 
 impl Actor {
@@ -50,6 +69,8 @@ impl Actor {
             commands,
             notifier,
             views,
+            me: tx.downgrade(),
+            sleep_timer: 0,
         };
         actor.publish();
         tokio::spawn(async move {
@@ -107,6 +128,22 @@ impl Actor {
                 let reply = self.renderer.on_player(event);
                 self.apply(reply);
             }
+            Msg::Screen(ScreenCommand { command: ScreenAction::SetSleepTimer { minutes }, .. }) => {
+                tracing::info!(command = "sleep_timer", minutes, "screen press");
+                self.set_sleep_timer(minutes);
+            }
+            Msg::SleepTimerEnded { timer } if timer == self.sleep_timer => {
+                tracing::info!("sleep timer ended: pausing");
+                self.sleep_timer = 0;
+                self.renderer.set_sleep_timer(None);
+                // Pause, not stop: the position stays for the morning.
+                if let Some(gen) = self.renderer.session().cast().map(|c| c.gen) {
+                    if let Ok(reply) = self.renderer.on_screen(ScreenCommand { gen, command: ScreenAction::Pause }) {
+                        self.apply(reply);
+                    }
+                }
+            }
+            Msg::SleepTimerEnded { .. } => {} // replaced or cancelled
             Msg::Screen(press) => {
                 let (command, gen) = (press.command.kind(), press.gen.0);
                 tracing::info!(command, gen, "screen press");
@@ -164,8 +201,29 @@ impl Actor {
 
     /// Sends the view to watchers if it changed (a phone polling its state
     /// changes nothing, so nothing is sent).
+    /// Starts (or replaces, or with `None` cancels) the sleep timer.
+    fn set_sleep_timer(&mut self, minutes: Option<u32>) {
+        self.sleep_timer += 1;
+        let Some(minutes) = minutes.filter(|m| *m > 0) else {
+            self.sleep_timer = 0;
+            self.renderer.set_sleep_timer(None);
+            return;
+        };
+        let after = Duration::from_secs(u64::from(minutes) * 60);
+        let ends = std::time::SystemTime::now() + after;
+        let ends_ms = ends.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+        self.renderer.set_sleep_timer(Some(ends_ms));
+        let (timer, me) = (self.sleep_timer, self.me.clone());
+        tokio::spawn(async move {
+            tokio::time::sleep(after).await;
+            if let Some(me) = me.upgrade() {
+                let _ = me.send(Msg::SleepTimerEnded { timer });
+            }
+        });
+    }
+
     fn publish(&self) {
-        let Ok(json) = serde_json::to_string(&self.renderer.session().view()) else { return };
+        let Ok(json) = serde_json::to_string(&self.renderer.view()) else { return };
         self.views.send_if_modified(|current| {
             let changed = **current != *json;
             if changed {
@@ -232,6 +290,10 @@ fn log_command(c: &PlayerCommand) {
         PlayerCommand::Stop => tracing::info!(command = "stop", "player command"),
         PlayerCommand::SetVolume { volume } => tracing::info!(command = "volume", volume, "player command"),
         PlayerCommand::SetMuted { muted } => tracing::info!(command = "mute", muted, "player command"),
+        PlayerCommand::SetRate { rate } => tracing::info!(command = "rate", rate, "player command"),
+        PlayerCommand::SelectTrack { kind, id } => {
+            tracing::info!(command = "track", kind = ?kind, id = id.as_deref().unwrap_or("none"), "player command")
+        }
     }
 }
 
