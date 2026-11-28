@@ -131,7 +131,7 @@ pub fn build(settings: &Settings, settings_path: Option<&Path>, registry: &Regis
     line(format!("- {} {} ({})", std::env::consts::OS, std::env::consts::ARCH, std::env::consts::FAMILY));
     line(format!("- settings: {}", settings_path.map_or("(none)".into(), |p| p.display().to_string())));
     line(format!(
-        "- name {:?}, player {:?}, port {}, log {:?}, font {:?}",
+        "- name {:?}, player {:?}, port {:?}, log {:?}, font {:?}",
         settings.name.as_deref().unwrap_or("(default)"),
         settings.player.as_deref().unwrap_or("log"),
         settings.port,

@@ -5,7 +5,6 @@
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, delimiter } from "node:path";
-import { hostname } from "node:os";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import type { PlayerInfo, Settings } from "./wizard.ts";
@@ -75,7 +74,8 @@ export function writeSettings(path: string, toml: string): void {
   writeFileSync(path, toml);
 }
 
-export const defaultName = () => `Castable (${hostname().replace(/\.local$/, "")})`;
+/** The name a fresh install shows, as the receiver works it out (castable_net::profile). */
+export const defaultName = (bin: string): string => ask(bin, ["--print-default-name"]);
 
 /**
  * Starts the receiver with its JSON log on stdout, one line per callback, and
@@ -117,6 +117,11 @@ export type PlayerKey =
 /** Presses a player key on the running receiver; it acts on what it shows now. */
 export function sendKey(child: ChildProcess, key: PlayerKey): void {
   if (child.stdin?.writable) child.stdin.write(`${key}\n`);
+}
+
+/** Renames the running receiver; it saves the name and logs `renamed` (or `rename refused`). */
+export function sendRename(child: ChildProcess, name: string): void {
+  if (child.stdin?.writable) child.stdin.write(`rename ${name.replace(/[\r\n]+/g, " ")}\n`);
 }
 
 /** Opens a file in its default app (a text editor or viewer). False if that can't start. */

@@ -201,3 +201,45 @@ async fn the_view_follows_the_cast_and_screen_presses_work() {
     .unwrap();
     rx.handle.shutdown().await;
 }
+
+/// A rename while running: the description and SSDP answers carry the new
+/// name and a new description id; the identity stays.
+#[tokio::test]
+async fn a_rename_shows_at_once_and_keeps_the_identity() {
+    let port = {
+        let probe = std::net::UdpSocket::bind("0.0.0.0:0").unwrap();
+        probe.local_addr().unwrap().port()
+    };
+    let rx = castable_net::start(Config { ssdp_port: Some(port), ..local_config() }).await.unwrap();
+    let udn = rx.handle.device().udn;
+    assert_eq!(rx.handle.rename("  Bedroom \n"), Ok("Bedroom".to_owned()));
+    assert_eq!(rx.handle.rename(" "), Err(castable_net::NameError::Empty));
+    assert_eq!((rx.handle.device().udn, rx.handle.device().config_id), (udn, 2));
+
+    let desc = http(rx.http_addr, "GET", "/desc.xml", &[], "").await;
+    assert!(desc.body.contains("<friendlyName>Bedroom</friendlyName>"), "{}", desc.body);
+
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let search = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 1\r\nST: upnp:rootdevice\r\n\r\n";
+    client.send_to(search.as_bytes(), ("127.0.0.1", port)).await.unwrap();
+    let mut buf = [0u8; 2048];
+    let (n, _) = tokio::time::timeout(Duration::from_secs(3), client.recv_from(&mut buf))
+        .await
+        .expect("no SSDP answer")
+        .unwrap();
+    assert!(String::from_utf8_lossy(&buf[..n]).contains("CONFIGID.UPNP.ORG: 2\r\n"));
+    rx.handle.shutdown().await;
+}
+
+/// A taken port falls back to a free one, so a second receiver still starts.
+#[tokio::test]
+async fn a_taken_port_falls_back_to_a_free_one() {
+    let taken = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = taken.local_addr().unwrap().port();
+    let rx = castable_net::start(Config { http: SocketAddr::from((Ipv4Addr::LOCALHOST, port)), ..local_config() })
+        .await
+        .unwrap();
+    assert_ne!(rx.http_addr.port(), port);
+    assert_ne!(rx.http_addr.port(), 0);
+}

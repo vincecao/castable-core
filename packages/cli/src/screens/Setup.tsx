@@ -8,7 +8,7 @@ import { initial, reduce, toToml, type State } from "../wizard.ts";
 function Setup({ bin, onDone }: { bin: string; onDone: (start: boolean) => void }) {
   const path = useRef(sys.settingsPath(bin)).current;
   const [state, dispatch] = useReducer(reduce, undefined, (): State =>
-    initial(sys.listPlayers(bin), sys.readSettings(path), sys.defaultName()),
+    initial(sys.listPlayers(bin), sys.readSettings(path), sys.defaultName(bin)),
   );
   useKeys(dispatch, state.step.kind !== "done");
   useEffect(() => {

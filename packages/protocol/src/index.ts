@@ -134,6 +134,15 @@ export type SenderCommand =
   | { type: "stop" }
   | { type: "seek"; toSecs: number };
 
+/** The longest receiver name, in characters. Mirrors `device::MAX_NAME_CHARS`. */
+export const MAX_NAME_CHARS = 64;
+
+/** Why a receiver name was refused (`device::NameError`). */
+export type NameError = "empty" | "tooLong";
+
+/** The HTTP port a receiver asks for first. Mirrors `castable_net::PREFERRED_PORT`. */
+export const PREFERRED_PORT = 49494;
+
 /** The speeds a screen may set (the core refuses others). Mirrors `RATES`. */
 export const RATE_RANGE = { min: 0.25, max: 4 } as const;
 

@@ -200,7 +200,10 @@ trait Player: Send {
 `castable_net::start(config)` returns a `Receiver` with a command stream, a `views` watch of
 the current view as JSON (what to show; updated only when it changes, so a phone polling its
 state costs nothing), and a `Handle` for reporting `PlayerEvent`s back (`player_event`) and for
-presses on the receiver's own screen (`screen_command`). An app such as the mobile receiver needs
+presses on the receiver's own screen (`screen_command`), and `rename(name)`: a live rename,
+no restart. The description serves the new name at once; SSDP says byebye, then alive with a new
+`CONFIGID.UPNP.ORG`, so senders list it again; the UDN stays, so it's the same device to them,
+and a cast on screen keeps playing. An app such as the mobile receiver needs
 nothing else: draw `views` with `@castable/ui`, play `commands`, report events. CI type-checks
 `castable-net` for `aarch64-linux-android` and `aarch64-apple-ios`. A desktop app, a phone app or a test fake all implement the same
 seam. The dispatch is generic (`run<P: Player>`), not `dyn`.
@@ -241,16 +244,29 @@ like `mpv.rs`.
 
 ## 6. Configuration and the CLI
 
+**One behaviour in every app** (`castable_net::profile`), so the desktop app, the phone apps and
+the CLI act alike for the people using them:
+
+| Fact | Rule |
+| --- | --- |
+| Identity | One id per install, saved as `device-id` in the app's folder (the CLI's config folder). Never derived from the name, so a rename is the same device to phones. A first run seeds it with the old name-derived id, so existing receivers keep theirs |
+| Default name | `Castable (<computer name>)` (macOS Computer Name, else host name): unique on a network with several receivers |
+| Names | `device::friendly_name`: spaces collapsed, ends trimmed, 1–64 characters (`NameError::Empty`, `TooLong`) |
+| Renaming | Live (`Handle::rename`), saved by the app: the desktop app beside its id, the CLI in `config.toml` |
+| Overrides | `--name` / `CASTABLE_NAME` apply to one run and are not saved |
+| Port | `PREFERRED_PORT` (49494), so the address people type stays the same; a free one when it's taken. `port = 0` always picks a free one |
+
 | What | Where |
 | --- | --- |
 | Settings (`name`, `player`, `port`, `log`) | `config.toml` in the config folder; flags override |
+| Install id | `device-id` in the config folder |
 | User players | `players.toml` in the config folder |
 | Config folder | `%APPDATA%\castable` on Windows, else `$XDG_CONFIG_HOME/castable` or `~/.config/castable` |
 | Overrides | `$CASTABLE_CONFIG`, `$CASTABLE_PLAYERS` |
 
 The receiver binary is the **single source of OS facts**: the CLI asks it for the player list
-(`--players --json`) and the settings path (`--print-config-path`) instead of re-implementing them
-in TypeScript.
+(`--players --json`), the settings path (`--print-config-path`) and the default name
+(`--print-default-name`) instead of re-implementing them in TypeScript.
 
 `packages/cli` (`pnpm castable`) has two screens, each a pure reducer with an Ink view:
 
@@ -259,7 +275,8 @@ in TypeScript.
 - **Live status** (`status.ts`): runs the receiver with `--log json` and folds each log line
   (`ready`, `transport`, `player command`, `player event`, `control refused`) into a status view.
   Keys: `q` stop, `l` open the log file (its path comes in the `ready` line), `r` write a report
-  next to it and open it; keys and the hint line come from one table. The "now playing" panel
+  next to it and open it, `n` rename (type, Enter saves, Esc cancels; sent as `rename NAME` on
+  `--control stdin`); keys and the hint line come from one table. The "now playing" panel
   shows the title, source (host, format, live), sender (app, IP), quality (`media info` summary),
   hardware decoder and position; recent lines are timestamped. Components follow the codebase's
   React pattern: one per file, `function` + `export default memo(...)`.
@@ -274,6 +291,7 @@ for example `RUST_LOG=castable_net=debug`.
 | Message | Fields |
 | --- | --- |
 | `ready` | `name`, `player`, `control`, `url` |
+| `renamed` / `rename refused` | `name` / `reason` (`Empty`, `TooLong`) and `detail` |
 | `control` / `control refused` | `action` (+ `code`, `error`, `category`, `upnp` when refused) |
 | `cast from` | `peer` (the phone's IP), `user_agent` (its app) |
 | `player command` | `command`, plus `gen`, `url`, `title` (decoded), `host`, `format` (hls, mp4…), `kind`, `mime`, `live`, `headers` on load, `to_s` on seek, `volume` |

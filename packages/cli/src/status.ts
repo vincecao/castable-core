@@ -118,6 +118,8 @@ const HANDLERS: Record<string, Handler> = {
     ...s,
     ready: { name: str(l.name), url: str(l.url), player: str(l.player), control: str(l.control), logFile: str(l.log_file) },
   }),
+  renamed: (s, l, say) => say(`renamed: “${str(l.name)}”`, s.ready ? { ready: { ...s.ready, name: str(l.name) } } : {}),
+  "rename refused": (_s, l, say) => say(`can't rename: ${str(l.detail)}`, {}, "warn"),
   // From the status screen itself (a shortcut's result), not the receiver.
   note: (_s, l, say) =>
     l.level === "WARN" ? say(str(l.text), { problem: str(l.text) }, "warn") : say(str(l.text)),
