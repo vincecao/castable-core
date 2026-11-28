@@ -1,6 +1,8 @@
 // The setup wizard as data: a discriminated union of steps and one pure
 // reducer. No I/O and no rendering here, so every key path is unit-tested.
 
+import { PREFERRED_PORT } from "@castable/protocol";
+
 export interface PlayerInfo {
   name: string;
   description: string;
@@ -18,10 +20,13 @@ export interface Settings {
   log: "pretty" | "json";
 }
 
-/** The ports offered: automatic, the common UPnP port, or typed. */
+/**
+ * The ports offered: Castable's own (as every Castable app uses, falling back
+ * to a free one when taken), a free one each time, or typed.
+ */
 export const PORTS = [
-  { label: "Automatic (a free port each time)", port: 0 },
-  { label: "49152 (stays the same; easier for firewalls)", port: 49152 },
+  { label: `${PREFERRED_PORT} (stays the same; easier to add by hand)`, port: PREFERRED_PORT },
+  { label: "A free port each time", port: 0 },
   { label: "Type a port", port: -1 },
 ] as const;
 
@@ -63,12 +68,23 @@ export function playerChoices(players: PlayerInfo[]): PlayerInfo[] {
   return [...usable, LOG_ONLY];
 }
 
+/**
+ * The port step for a saved port: on its option, or on "Type a port" for a
+ * custom one. Coming forward, a custom port opens typed in, so Enter keeps it;
+ * coming back from the review, the list shows.
+ */
+function portStep(port: number, prefill: boolean): Step {
+  const preset = PORTS.findIndex((p) => p.port === port);
+  if (preset >= 0) return { kind: "port", cursor: preset, typing: null };
+  return { kind: "port", cursor: PORTS.findIndex((p) => p.port === -1), typing: prefill ? String(port) : null };
+}
+
 export function initial(players: PlayerInfo[], current: Partial<Settings>, defaultName: string): State {
   const choices = playerChoices(players);
   const draft: Settings = {
     name: current.name ?? defaultName,
     player: current.player ?? choices[0]?.name ?? "log",
-    port: current.port ?? 0,
+    port: current.port ?? PREFERRED_PORT,
     log: current.log ?? "pretty",
   };
   return { step: { kind: "name", value: draft.name }, draft, choices, error: null };
@@ -118,8 +134,7 @@ export function reduce(state: State, key: Key): State {
           const choice = choices[step.cursor];
           if (!choice) return state;
           if (!choice.installed) return fail(`${choice.name} isn't installed. Install it, or pick another player.`);
-          const cursor = Math.max(0, PORTS.findIndex((p) => p.port === draft.port));
-          return go({ kind: "port", cursor, typing: null }, { player: choice.name });
+          return go(portStep(draft.port, true), { player: choice.name });
         }
         default:
           return state;
@@ -166,7 +181,7 @@ export function reduce(state: State, key: Key): State {
         case "down":
           return go({ kind: "review", cursor: wrap(step.cursor + 1, REVIEW.length) });
         case "back":
-          return go({ kind: "port", cursor: Math.max(0, PORTS.findIndex((p) => p.port === draft.port)), typing: null });
+          return go(portStep(draft.port, false));
         case "enter":
           if (step.cursor === 2) return go({ kind: "name", value: draft.name });
           return go({ kind: "done", start: step.cursor === 0 });

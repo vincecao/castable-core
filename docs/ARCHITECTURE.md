@@ -254,7 +254,7 @@ the CLI act alike for the people using them:
 | Names | `device::friendly_name`: spaces collapsed, ends trimmed, 1–64 characters (`NameError::Empty`, `TooLong`) |
 | Renaming | Live (`Handle::rename`), saved by the app: the desktop app beside its id, the CLI in `config.toml` |
 | Overrides | `--name` / `CASTABLE_NAME` apply to one run and are not saved |
-| Port | `PREFERRED_PORT` (49494), so the address people type stays the same; a free one when it's taken. `port = 0` always picks a free one |
+| Port | `PREFERRED_PORT` (49494), so the address people type stays the same; a free one when it's taken. `port = 0` always picks a free one. The wizard offers 49494 first; a saved custom port opens typed in |
 
 | What | Where |
 | --- | --- |

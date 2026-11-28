@@ -100,7 +100,9 @@ function Run({ bin }: { bin: string }) {
         return setDraft(null);
       }
       if (key.backspace || key.delete) return setDraft(draft.slice(0, -1));
-      if (input && !key.ctrl && !key.meta) setDraft(draft + input);
+      if (key.ctrl || key.meta) return;
+      // A chunk of input (fast typing, a paste) can mix text and backspaces: apply each in turn.
+      setDraft([...input].reduce((d, c) => (c === "\x7f" || c === "\b" ? d.slice(0, -1) : c >= " " ? d + c : d), draft));
       return;
     }
     const player = playerKey(input, key);
