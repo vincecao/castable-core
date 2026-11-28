@@ -6,6 +6,10 @@ on:
     branches: [main, "feat/**", "fix/**"]
   pull_request:
 
+# Checks only read the code.
+permissions:
+  contents: read
+
 jobs:
   rust:
     # Every OS the receiver supports, so Windows-only code (named pipes, paths) is built and tested.
