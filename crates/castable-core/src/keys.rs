@@ -84,15 +84,16 @@ impl Renderer {
             if cast.media.is_live() {
                 return None;
             }
-            let end = cast.duration.map_or(f64::MAX, |d| d.as_secs_f64());
+            // A duration of 0 means the player doesn't know it yet (a stream), not "ends at 0".
+            let end = cast.duration.filter(|d| !d.is_zero()).map_or(f64::MAX, |d| d.as_secs_f64());
             let to = (cast.position.as_secs_f64() + by).clamp(0.0, end);
             Some(ScreenAction::Seek { to: Duration::from_secs_f64(to) })
         };
-        let speed = |dir: isize| {
-            let i = SPEEDS.iter().position(|s| *s >= cast.rate - 1e-3).unwrap_or(2) as isize;
-            let next = SPEEDS[(i + dir).clamp(0, SPEEDS.len() as isize - 1) as usize];
-            (next != cast.rate).then_some(ScreenAction::SetRate { rate: next })
-        };
+        // The next listed speed strictly above (faster) or below (slower) the
+        // current one, which a phone may have set to a speed not in the list.
+        let faster = || SPEEDS.iter().find(|s| **s > cast.rate + 1e-3).map(|&rate| ScreenAction::SetRate { rate });
+        let slower =
+            || SPEEDS.iter().rev().find(|s| **s < cast.rate - 1e-3).map(|&rate| ScreenAction::SetRate { rate });
         match key {
             K::PlayPause if *playback == Playback::Playing => Some(ScreenAction::Pause),
             K::PlayPause => Some(ScreenAction::Play),
@@ -102,8 +103,8 @@ impl Renderer {
             K::StepForward => seek(SEEK_FINE),
             K::JumpBack => seek(-SEEK_LONG),
             K::JumpForward => seek(SEEK_LONG),
-            K::Slower => speed(-1),
-            K::Faster => speed(1),
+            K::Slower => slower(),
+            K::Faster => faster(),
             K::VolumeUp | K::VolumeDown | K::Mute | K::Back => unreachable!("handled above"),
         }
     }
@@ -143,6 +144,34 @@ mod tests {
         r.on_screen(ScreenCommand { gen: Gen(1), command: ScreenAction::SetRate { rate: 0.5 } }).unwrap();
         assert_eq!(r.key_action(PlayerKey::Slower), None, "already the slowest");
         assert_eq!(r.key_action(PlayerKey::Back), Some(ScreenAction::Close));
+    }
+
+    #[test]
+    fn speed_keys_step_from_speeds_not_in_the_list() {
+        let mut r = playing();
+        let set = |r: &mut Renderer, rate| {
+            r.on_screen(ScreenCommand { gen: Gen(1), command: ScreenAction::SetRate { rate } }).unwrap()
+        };
+        set(&mut r, 4.0);
+        assert_eq!(r.key_action(PlayerKey::Faster), None, "already above the list");
+        assert_eq!(r.key_action(PlayerKey::Slower), Some(ScreenAction::SetRate { rate: 3.0 }));
+        set(&mut r, 0.25);
+        assert_eq!(r.key_action(PlayerKey::Slower), None);
+        assert_eq!(r.key_action(PlayerKey::Faster), Some(ScreenAction::SetRate { rate: 0.5 }));
+        set(&mut r, 1.1);
+        assert_eq!(r.key_action(PlayerKey::Faster), Some(ScreenAction::SetRate { rate: 1.25 }));
+        assert_eq!(r.key_action(PlayerKey::Slower), Some(ScreenAction::SetRate { rate: 1.0 }));
+    }
+
+    #[test]
+    fn an_unknown_length_doesnt_pin_seeks_to_zero() {
+        let mut r = playing();
+        r.on_player(PlayerEvent::Progress {
+            gen: Gen(1),
+            position: Duration::from_secs(30),
+            duration: Some(Duration::ZERO),
+        });
+        assert_eq!(r.key_action(PlayerKey::SeekForward), Some(ScreenAction::Seek { to: Duration::from_secs(35) }));
     }
 
     #[test]

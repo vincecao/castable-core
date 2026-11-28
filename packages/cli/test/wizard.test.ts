@@ -71,3 +71,19 @@ test("the settings file escapes quotes and backslashes", () => {
   assert.match(toml, /name = "Lineng's \\"TV\\""/);
   assert.match(toml, /player = "C:\\\\mpv \{url\}"/);
 });
+
+test("a name longer than the receiver takes is refused here", () => {
+  const long = { type: "char", char: "x".repeat(65) } as Key;
+  const s = press(initial(players, {}, "X"), ...Array<Key>(10).fill(erase), long, enter);
+  assert.match(s.error ?? "", /64 characters/);
+});
+
+test("a hand-edited settings file with comments reads back", async () => {
+  const { readSettings } = await import("../src/system.ts");
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const file = join(mkdtempSync(join(tmpdir(), "castable-")), "config.toml");
+  writeFileSync(file, 'name = "Den \\"TV\\""   # shown on phones\nplayer = "mpv"      # see --players\nport = 49494 # fixed\nlog = "json"\n');
+  assert.deepEqual(readSettings(file), { name: 'Den "TV"', player: "mpv", port: 49494, log: "json" });
+});

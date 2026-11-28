@@ -30,8 +30,9 @@ pub fn open_log(path: &Path) -> std::io::Result<std::fs::File> {
     std::fs::File::create(path)
 }
 
-/// Hides what a report shouldn't carry: URL query strings and fragments
-/// (they often hold tokens), passwords and authorization headers.
+/// Hides what a report shouldn't carry: URL credentials (`user:password@`),
+/// query strings and fragments (they often hold tokens), passwords and
+/// authorization headers.
 pub fn redact(line: &str) -> String {
     let mut out = String::with_capacity(line.len());
     let mut rest = line;
@@ -44,7 +45,15 @@ pub fn redact(line: &str) -> String {
         let url_end = rest[i..]
             .find(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '<' | '>' | '\\' | ',' | '|'))
             .map_or(rest.len(), |e| i + e);
-        let url = &rest[start..url_end];
+        let mut url = &rest[start..url_end];
+        // user:password@host: keep the scheme and host, hide the credentials.
+        let scheme_end = i - start + 3;
+        let authority_end = url[scheme_end..].find(['/', '?', '#']).map_or(url.len(), |e| scheme_end + e);
+        if let Some(at) = url[..authority_end].rfind('@') {
+            out.push_str(&url[..scheme_end]);
+            out.push_str("…@");
+            url = &url[at + 1..];
+        }
         match url.find(['?', '#']) {
             Some(q) => {
                 out.push_str(&url[..q]);
@@ -63,7 +72,9 @@ pub fn redact(line: &str) -> String {
 }
 
 fn redact_value(line: &str, key: &str) -> String {
-    let lower = line.to_lowercase();
+    // ASCII only: full Unicode lowercasing can change byte lengths (İ), and the
+    // offsets found here slice `line` itself.
+    let lower = line.to_ascii_lowercase();
     let mut out = String::with_capacity(line.len());
     let mut last = 0;
     let mut from = 0;
@@ -180,6 +191,19 @@ pub fn build(settings: &Settings, settings_path: Option<&Path>, registry: &Regis
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn credentials_in_urls_and_non_ascii_text_stay_redacted() {
+        assert_eq!(
+            redact("load https://user:secret@media.example.com/a.m3u8?token=1 done"),
+            "load https://…@media.example.com/a.m3u8?… done"
+        );
+        // Characters whose lowercase is longer (İ) don't shift where a secret is found…
+        assert_eq!(redact("İ password=secret"), "İ password=…");
+        // …or make the slicing panic.
+        assert_eq!(redact("İ password中文=x"), "İ password中文=x");
+        assert_eq!(redact("标题 İ cookie: abc; token=xyz"), "标题 İ cookie: …; token=…");
+    }
 
     #[test]
     fn redacts_tokens_but_keeps_what_helps() {

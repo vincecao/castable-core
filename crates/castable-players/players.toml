@@ -14,7 +14,11 @@
 #                  {title}        the title, if the sender gave one
 #                  {referer}      the Referer header the stream needs, if any
 #                  {user_agent}   the User-Agent header the stream needs, if any
-#                  {headers}      all headers as "Name: value,Name: value", if any
+#                  {header}       one header as "Name: value": the argument (or group)
+#                                 is repeated for each header, so a comma in a value
+#                                 (a User-Agent, a cookie) can't split it
+#                  {headers}      all headers as "Name: value,Name: value", if any (only
+#                                 for a player that wants one list; prefer {header})
 #                  {font}         a font for on-screen text and subtitles that also
 #                                 covers Chinese/Japanese/Korean (`font` in
 #                                 config.toml; by default PingFang SC on macOS,
@@ -39,15 +43,15 @@
 description = "mpv: plays almost anything, full control"
 program = ["mpv", "C:\\Program Files\\mpv\\mpv.exe"]
 args = ["--pause", "--force-window=immediate", "--keep-open=no", "--input-ipc-server={ipc}",
-        "--force-media-title={title}", "--http-header-fields={headers}",
-        "--osd-font={font}", "--sub-font={font}", "{url}"]
+        "--force-media-title={title}", "--http-header-fields-append={header}",
+        "--osd-font={font}", "--sub-font={font}", "--", "{url}"]
 control = "mpv-ipc"
 
 [players.iina]
 description = "IINA (macOS, built on mpv), full control"
 program = ["/Applications/IINA.app/Contents/MacOS/iina-cli", "iina"]
 args = ["--no-stdin", "--mpv-pause", "--mpv-input-ipc-server={ipc}",
-        "--mpv-force-media-title={title}", "--mpv-http-header-fields={headers}",
+        "--mpv-force-media-title={title}", "--mpv-http-header-fields-append={header}",
         "--mpv-osd-font={font}", "--mpv-sub-font={font}", "{url}"]
 control = "mpv-ipc"
 platforms = ["macos"]

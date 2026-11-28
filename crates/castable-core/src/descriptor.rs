@@ -17,7 +17,7 @@ pub enum MediaKind {
 /// How the media is delivered. A discriminated union: a live stream has no
 /// duration and can't be seeked; on-demand media may carry a start position.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum Delivery {
     OnDemand {
         #[serde(default, skip_serializing_if = "Option::is_none")]

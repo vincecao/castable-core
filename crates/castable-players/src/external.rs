@@ -23,6 +23,8 @@ pub struct External {
     gen: Option<Gen>,
     /// Commands for the running player's control protocol (never `Load`).
     ctl: Option<UnboundedSender<PlayerCommand>>,
+    /// The running mpv's IPC socket, removed on close.
+    socket: Option<PathBuf>,
     warned: bool,
 }
 
@@ -47,6 +49,7 @@ impl External {
             font: None,
             gen: None,
             ctl: None,
+            socket: None,
             warned: false,
         })
     }
@@ -84,6 +87,7 @@ impl External {
         match self.spec.control {
             Control::MpvIpc => {
                 vars.insert("ipc", socket.display().to_string());
+                self.socket = Some(socket.clone());
             }
             Control::VlcHttp => {
                 vars.insert("port", remote.port.to_string());
@@ -138,9 +142,16 @@ fn media_vars(media: &MediaDescriptor) -> Vars {
     if let Some(a) = header("User-Agent") {
         vars.insert("user_agent", a);
     }
-    if !media.headers.is_empty() {
-        let all: Vec<String> = media.headers.iter().map(|(k, v)| format!("{k}: {v}")).collect();
+    // A header with a line break would smuggle more headers in: left out.
+    let all: Vec<String> = media
+        .headers
+        .iter()
+        .filter(|(k, v)| !(k.contains(['\r', '\n']) || v.contains(['\r', '\n'])))
+        .map(|(k, v)| format!("{k}: {v}"))
+        .collect();
+    if !all.is_empty() {
         vars.insert("headers", all.join(","));
+        vars.insert(crate::spec::EACH_HEADER, all.join("\n"));
     }
     vars
 }
@@ -169,6 +180,10 @@ impl Player for External {
         if let Some(p) = self.proc.take() {
             p.kill().await;
         }
+        // mpv is killed, so it can't remove its socket.
+        if let Some(socket) = self.socket.take() {
+            let _ = std::fs::remove_file(socket);
+        }
     }
 }
 
@@ -187,5 +202,30 @@ mod tests {
         assert_eq!(v["referer"], "https://media.example.com/");
         assert_eq!(v["headers"], "Referer: https://media.example.com/");
         assert!(!v.contains_key("user_agent"));
+    }
+
+    #[test]
+    fn mpv_gets_each_header_as_its_own_argument() {
+        let mut m = MediaDescriptor::video("https://media.example.com/a.m3u8");
+        m.headers.insert("Referer".into(), "https://media.example.com/".into());
+        m.headers.insert("User-Agent".into(), "Mozilla/5.0 (KHTML, like Gecko) ExampleCast/1.0".into());
+        m.headers.insert("X-Bad".into(), "a\r\nHost: elsewhere".into());
+        let mpv = crate::spec::Registry::built_in().get("mpv").unwrap().clone();
+        let mut vars = media_vars(&m);
+        vars.insert("ipc", "/run/castable/mpv.sock".into());
+        let args = mpv.expand_args(&vars);
+        let headers: Vec<&String> = args.iter().filter(|a| a.starts_with("--http-header-fields-append=")).collect();
+        assert_eq!(
+            headers,
+            [
+                "--http-header-fields-append=Referer: https://media.example.com/",
+                "--http-header-fields-append=User-Agent: Mozilla/5.0 (KHTML, like Gecko) ExampleCast/1.0",
+            ]
+        );
+        assert_eq!(
+            &args[args.len() - 2..],
+            ["--", "https://media.example.com/a.m3u8"],
+            "the URL can't be read as an option"
+        );
     }
 }

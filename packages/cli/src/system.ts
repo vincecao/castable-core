@@ -61,7 +61,9 @@ export function readSettings(path: string): Partial<Settings> {
     const m = /^\s*(\w+)\s*=\s*(.+?)\s*$/.exec(line);
     if (!m) continue;
     const [, key, raw] = m as unknown as [string, string, string];
-    const value = raw.startsWith('"') ? (JSON.parse(raw) as string) : raw;
+    // A quoted string, then maybe a comment (`player = "mpv"   # ...`); else a bare value before any comment.
+    const quoted = /^"((?:[^"\\]|\\.)*)"/.exec(raw);
+    const value = quoted ? (JSON.parse(`"${quoted[1]}"`) as string) : (raw.split("#")[0] ?? "").trim();
     if (key === "name" || key === "player") out[key] = value;
     if (key === "port") out.port = Number(value);
     if (key === "log" && (value === "pretty" || value === "json")) out.log = value;
@@ -146,8 +148,15 @@ export function writeReport(bin: string, dir: string): string {
   return ask(bin, ["--report", join(dir, `castable-report-${stamp}.md`)]);
 }
 
-/** Stops the receiver so it can say goodbye on the network (SSDP byebye). */
+/**
+ * Stops the receiver so it says goodbye on the network (SSDP byebye) and
+ * closes its player: closing its control input asks it to stop, on every
+ * platform (Windows has no Ctrl-C to send; a kill there skips the goodbye).
+ * If it hasn't stopped in 3 s, it's interrupted, then killed.
+ */
 export function stopReceiver(child: ChildProcess): void {
-  if (process.platform === "win32") child.kill();
-  else child.kill("SIGINT");
+  if (child.exitCode !== null) return;
+  child.stdin?.end();
+  const force = setTimeout(() => child.kill(process.platform === "win32" ? undefined : "SIGINT"), 3000);
+  child.once("exit", () => clearTimeout(force));
 }

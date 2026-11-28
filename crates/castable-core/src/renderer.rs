@@ -7,7 +7,7 @@ use crate::didl::descriptor_from;
 use crate::error::UpnpError;
 use crate::service::{sink_protocol_info, Service};
 use crate::session::{
-    Input, Phase, Playback, PlayerCommand, PlayerEvent, ScreenAction, ScreenCommand, SenderCommand, Session, View,
+    Gen, Input, Phase, Playback, PlayerCommand, PlayerEvent, ScreenAction, ScreenCommand, SenderCommand, Session, View,
 };
 use crate::soap::RawCall;
 use crate::time::{format_hms, parse_hms};
@@ -137,8 +137,11 @@ struct Track {
 #[derive(Debug, Clone)]
 pub struct Renderer {
     session: Session,
-    /// The raw DIDL-Lite of the current cast, echoed back to senders.
-    metadata: String,
+    /// The raw DIDL-Lite a sender gave with a cast, and that cast's generation:
+    /// echoed back only while that cast is the current one, so it goes with
+    /// the cast (a screen Close back to idle clears it). Kept here rather than
+    /// on `Cast` because `SenderCommand::SetUri` is the shared protocol type.
+    metadata: Option<(Gen, String)>,
     volume: u8,
     muted: bool,
     /// When the sleep timer stops playback (Unix ms), as the receiver set it.
@@ -147,7 +150,7 @@ pub struct Renderer {
 
 impl Default for Renderer {
     fn default() -> Self {
-        Self { session: Session::new(), metadata: String::new(), volume: 50, muted: false, sleep_ends_at_ms: None }
+        Self { session: Session::new(), metadata: None, volume: 50, muted: false, sleep_ends_at_ms: None }
     }
 }
 
@@ -199,12 +202,14 @@ impl Renderer {
         let sender = |r: &mut Self, c: SenderCommand| r.drive(Input::Sender(c));
         Ok(match action {
             A::SetUri { uri, metadata } => {
-                if uri.is_empty() {
+                // Only web media: a URL is handed to a player (and `open`), so a
+                // `file://`, an app scheme or a leading `-` (an option) is refused.
+                if !is_web_url(&uri) {
                     return Err(UpnpError::InvalidArgs);
                 }
                 let media = descriptor_from(&uri, Some(&metadata));
                 let reply = sender(self, SenderCommand::SetUri(media))?;
-                self.metadata = metadata;
+                self.metadata = self.session.cast().map(|c| (c.gen, metadata));
                 reply
             }
             A::Play => sender(self, SenderCommand::Play)?,
@@ -276,17 +281,24 @@ impl Renderer {
         use Action as A;
         let s = &self.session;
         let Track { uri, duration, position, count } = self.track();
+        let cast = s.cast();
+        let didl = match (&self.metadata, cast) {
+            (Some((gen, didl)), Some(c)) if *gen == c.gen => didl.as_str(),
+            _ => "",
+        };
+        // The speed the screen set (shown as a plain number: "1", "1.5").
+        let speed = cast.map_or(1.0, |c| c.rate).to_string();
         let o = |pairs: &[(&'static str, &str)]| pairs.iter().map(|(k, v)| (*k, v.to_string())).collect();
         match action {
             A::GetTransportInfo => o(&[
                 ("CurrentTransportState", s.transport_state().as_str()),
                 ("CurrentTransportStatus", s.transport_status()),
-                ("CurrentSpeed", "1"),
+                ("CurrentSpeed", &speed),
             ]),
             A::GetPositionInfo => o(&[
                 ("Track", count),
                 ("TrackDuration", &duration),
-                ("TrackMetaData", &self.metadata),
+                ("TrackMetaData", didl),
                 ("TrackURI", &uri),
                 ("RelTime", &position),
                 ("AbsTime", &position),
@@ -297,7 +309,7 @@ impl Renderer {
                 ("NrTracks", count),
                 ("MediaDuration", &duration),
                 ("CurrentURI", &uri),
-                ("CurrentURIMetaData", &self.metadata),
+                ("CurrentURIMetaData", didl),
                 ("NextURI", ""),
                 ("NextURIMetaData", ""),
                 ("PlayMedium", "NETWORK"),
@@ -372,6 +384,19 @@ impl Renderer {
     }
 }
 
+/// An `http://` or `https://` URL with a host: what a cast may point at.
+pub fn is_web_url(uri: &str) -> bool {
+    let lower = uri.trim_start().get(..8).unwrap_or_default().to_ascii_lowercase();
+    let rest = if lower.starts_with("https://") {
+        &uri.trim_start()[8..]
+    } else if lower.starts_with("http://") {
+        &uri.trim_start()[7..]
+    } else {
+        return false;
+    };
+    rest.chars().next().is_some_and(|c| c != '/')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -383,6 +408,43 @@ mod tests {
             r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>{body}</s:Body></s:Envelope>"#
         );
         Action::parse(service, &parse_request(&xml).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn only_web_urls_can_be_cast() {
+        let mut r = Renderer::new();
+        for bad in [
+            "",
+            "file:///etc/passwd",
+            "--log-file=/tmp/x",
+            "javascript:alert(1)",
+            "http:///nohost",
+            "smb://192.0.2.1/x",
+        ] {
+            let e = r.act(Action::SetUri { uri: bad.into(), metadata: String::new() });
+            assert!(matches!(e, Err(UpnpError::InvalidArgs)), "{bad} was accepted");
+        }
+        assert!(r
+            .act(Action::SetUri { uri: "HTTPS://cdn.example.com/a.m3u8".into(), metadata: String::new() })
+            .is_ok());
+    }
+
+    #[test]
+    fn senders_see_the_speed_and_the_metadata_of_the_current_cast() {
+        let mut r = Renderer::new();
+        let didl = "<DIDL-Lite><item><dc:title>Episode 1</dc:title></item></DIDL-Lite>";
+        r.act(Action::SetUri { uri: "http://media.example.com/e1.mp4".into(), metadata: didl.into() }).unwrap();
+        r.act(Action::Play).unwrap();
+        r.on_player(PlayerEvent::Loaded { gen: Gen(1), duration: None });
+        r.on_screen(ScreenCommand { gen: Gen(1), command: ScreenAction::SetRate { rate: 1.5 } }).unwrap();
+        let info = r.act(Action::GetTransportInfo).unwrap().out;
+        assert!(info.iter().any(|(k, v)| *k == "CurrentSpeed" && v == "1.5"), "{info:?}");
+        let media = r.act(Action::GetMediaInfo).unwrap().out;
+        assert!(media.iter().any(|(k, v)| *k == "CurrentURIMetaData" && v == didl));
+        // Closed on the screen: back to idle, and the cast's metadata goes with it.
+        r.on_screen(ScreenCommand { gen: Gen(1), command: ScreenAction::Close }).unwrap();
+        let media = r.act(Action::GetMediaInfo).unwrap().out;
+        assert!(media.iter().any(|(k, v)| *k == "CurrentURIMetaData" && v.is_empty()), "{media:?}");
     }
 
     #[test]

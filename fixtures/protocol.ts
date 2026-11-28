@@ -15,6 +15,18 @@ export const protocol = {
       "type": "load"
     },
     {
+      "gen": 2,
+      "media": {
+        "delivery": {
+          "startAtSecs": 90.5,
+          "type": "onDemand"
+        },
+        "kind": "video",
+        "url": "http://192.0.2.10/e2.mp4"
+      },
+      "type": "load"
+    },
+    {
       "type": "play"
     },
     {

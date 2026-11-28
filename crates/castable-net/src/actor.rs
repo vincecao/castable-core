@@ -6,6 +6,7 @@ use castable_core::{
     Action, ErrorCode, PlayerCommand, PlayerEvent, PlayerKey, Renderer, Reply, ScreenAction, ScreenCommand, Service,
     TransportState, UpnpError,
 };
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -29,7 +30,13 @@ pub enum Msg {
     Subscribe {
         service: Service,
         req: SubscribeRequest,
+        /// Where the request came from: a new subscription's CALLBACK must be this address.
+        peer: std::net::IpAddr,
         reply: oneshot::Sender<Option<(String, Duration)>>,
+    },
+    /// A subscriber failed too many deliveries in a row: stop sending to it.
+    DropSubscriber {
+        sid: String,
     },
     /// A sleep timer ran out; `timer` says which one (a newer one replaces it).
     SleepTimerEnded {
@@ -53,7 +60,11 @@ pub struct Actor {
     /// To post to itself (the sleep timer's end); weak, so the actor still ends with its senders.
     me: mpsc::WeakUnboundedSender<Msg>,
     /// The current sleep timer's number; 0 when none is set.
-    sleep_timer: u64,
+    /// Ids for sleep timers: only ever counts up, so a cancelled timer's
+    /// still-sleeping task can never match a later one.
+    timers: u64,
+    /// The running sleep timer's id, if one is set.
+    sleep_timer: Option<u64>,
 }
 
 impl Actor {
@@ -63,7 +74,7 @@ impl Actor {
     ) -> mpsc::UnboundedSender<Msg> {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let (notifier, notify_rx) = mpsc::unbounded_channel();
-        tokio::spawn(deliver_all(notify_rx));
+        tokio::spawn(deliver_all(notify_rx, tx.downgrade()));
         let mut actor = Actor {
             renderer: Renderer::new(),
             logged_state: TransportState::NoMediaPresent,
@@ -72,7 +83,8 @@ impl Actor {
             notifier,
             views,
             me: tx.downgrade(),
-            sleep_timer: 0,
+            timers: 0,
+            sleep_timer: None,
         };
         actor.publish();
         tokio::spawn(async move {
@@ -134,9 +146,9 @@ impl Actor {
                 tracing::info!(command = "sleep_timer", minutes, "screen press");
                 self.set_sleep_timer(minutes);
             }
-            Msg::SleepTimerEnded { timer } if timer == self.sleep_timer => {
+            Msg::SleepTimerEnded { timer } if Some(timer) == self.sleep_timer => {
                 tracing::info!("sleep timer ended: pausing");
-                self.sleep_timer = 0;
+                self.sleep_timer = None;
                 self.renderer.set_sleep_timer(None);
                 // Pause, not stop: the position stays for the morning.
                 if let Some(gen) = self.renderer.session().cast().map(|c| c.gen) {
@@ -166,20 +178,28 @@ impl Actor {
                     }
                 }
             }
-            Msg::Subscribe { service, req, reply } => {
+            Msg::Subscribe { service, req, peer, reply } => {
                 let renew = matches!(req, SubscribeRequest::Renew { .. });
-                let granted = self.subs.subscribe(service, req, Instant::now());
+                let granted = self.subs.subscribe(service, req, peer, Instant::now());
                 match &granted {
-                    Some((sid, timeout)) => {
+                    Ok((sid, timeout)) => {
                         tracing::info!(service = service.id(), sid = %sid, renew, timeout_s = timeout.as_secs(), "subscribed");
                         if !renew {
-                            // The initial event, with the full state, goes to the new subscriber only.
+                            // The initial event, with the full state, goes to the new subscriber only
+                            // (its delivery waits for the SUBSCRIBE reply: see `deliver_to`).
                             self.notify(service, Some(sid));
                         }
                     }
-                    None => tracing::info!(service = service.id(), renew, "subscription refused"),
+                    Err(why) => {
+                        tracing::info!(service = service.id(), renew, peer = %peer, reason = why.as_str(), "subscription refused")
+                    }
                 }
-                let _ = reply.send(granted);
+                let _ = reply.send(granted.ok());
+            }
+            Msg::DropSubscriber { sid } => {
+                if self.subs.unsubscribe(&sid) {
+                    tracing::warn!(sid = %sid, "subscriber unreachable; subscription dropped");
+                }
             }
             Msg::Unsubscribe { sid, reply } => {
                 let removed = self.subs.unsubscribe(&sid);
@@ -212,17 +232,18 @@ impl Actor {
     /// changes nothing, so nothing is sent).
     /// Starts (or replaces, or with `None` cancels) the sleep timer.
     fn set_sleep_timer(&mut self, minutes: Option<u32>) {
-        self.sleep_timer += 1;
         let Some(minutes) = minutes.filter(|m| *m > 0) else {
-            self.sleep_timer = 0;
+            self.sleep_timer = None;
             self.renderer.set_sleep_timer(None);
             return;
         };
+        self.timers += 1;
+        self.sleep_timer = Some(self.timers);
         let after = Duration::from_secs(u64::from(minutes) * 60);
         let ends = std::time::SystemTime::now() + after;
         let ends_ms = ends.duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
         self.renderer.set_sleep_timer(Some(ends_ms));
-        let (timer, me) = (self.sleep_timer, self.me.clone());
+        let (timer, me) = (self.timers, self.me.clone());
         tokio::spawn(async move {
             tokio::time::sleep(after).await;
             if let Some(me) = me.upgrade() {
@@ -306,15 +327,61 @@ fn log_command(c: &PlayerCommand) {
     }
 }
 
-/// Sends NOTIFYs one at a time, so each subscriber sees events in order.
-async fn deliver_all(mut rx: mpsc::UnboundedReceiver<Delivery>) {
+/// Events a subscriber may have waiting; past this it's stuck, and dropped.
+const QUEUE: usize = 16;
+/// Failed deliveries in a row before a subscriber is dropped.
+const FAILURES: u32 = 3;
+/// How long the first event waits, so it reaches the subscriber after the
+/// SUBSCRIBE reply that carries its SID (UPnP's order; strict control points
+/// drop an event for a SID they don't know yet).
+const INITIAL_DELAY: Duration = Duration::from_millis(200);
+
+/// Hands each NOTIFY to its subscriber's own queue: events reach a subscriber
+/// in order, and a slow or unreachable one doesn't hold up the others.
+async fn deliver_all(mut rx: mpsc::UnboundedReceiver<Delivery>, actor: mpsc::WeakUnboundedSender<Msg>) {
+    let mut queues: HashMap<String, mpsc::Sender<Delivery>> = HashMap::new();
     while let Some(d) = rx.recv().await {
-        if let Err(e) = tokio::time::timeout(Duration::from_secs(3), deliver(&d))
-            .await
-            .unwrap_or_else(|_| Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out")))
-        {
-            tracing::warn!(sid = %d.sid, seq = d.seq, host = %d.callback.host, error = %e, "event delivery failed");
+        queues.retain(|_, q| !q.is_closed());
+        let queue = queues.entry(d.sid.clone()).or_insert_with(|| {
+            let (tx, rx) = mpsc::channel(QUEUE);
+            tokio::spawn(deliver_to(d.sid.clone(), rx, actor.clone()));
+            tx
+        });
+        if let Err(mpsc::error::TrySendError::Full(d)) = queue.try_send(d) {
+            tracing::warn!(sid = %d.sid, "subscriber's events backed up");
+            drop_subscriber(&actor, &d.sid);
         }
+    }
+}
+
+/// One subscriber's events, in order. Ends when its queue closes or stays
+/// empty for the longest subscription; asks the actor to drop the
+/// subscription after repeated failures.
+async fn deliver_to(sid: String, mut rx: mpsc::Receiver<Delivery>, actor: mpsc::WeakUnboundedSender<Msg>) {
+    let mut failures = 0;
+    while let Ok(Some(d)) = tokio::time::timeout(Duration::from_secs(7200), rx.recv()).await {
+        if d.seq == 0 {
+            tokio::time::sleep(INITIAL_DELAY).await;
+        }
+        match tokio::time::timeout(Duration::from_secs(3), deliver(&d)).await {
+            Ok(Ok(())) => failures = 0,
+            outcome => {
+                let error = outcome
+                    .map_or_else(|_| "timed out".to_owned(), |r| r.err().map(|e| e.to_string()).unwrap_or_default());
+                tracing::warn!(sid = %d.sid, seq = d.seq, host = %d.callback.host, error = %error, "event delivery failed");
+                failures += 1;
+                if failures >= FAILURES {
+                    drop_subscriber(&actor, &sid);
+                    return;
+                }
+            }
+        }
+    }
+}
+
+fn drop_subscriber(actor: &mpsc::WeakUnboundedSender<Msg>, sid: &str) {
+    if let Some(actor) = actor.upgrade() {
+        let _ = actor.send(Msg::DropSubscriber { sid: sid.to_owned() });
     }
 }
 

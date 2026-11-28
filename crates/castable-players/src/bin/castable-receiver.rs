@@ -308,11 +308,22 @@ async fn main() -> std::io::Result<()> {
         println!("\n  \"{name}\" is ready. Open a cast app on a phone on the same Wi-Fi and pick it.\n");
     }
 
+    // Ctrl-C, or with `--control stdin` the front end closing its input (how
+    // the CLI stops it on Windows, where it can't send Ctrl-C): either way the
+    // receiver says goodbye on the network and closes its player.
+    let (closed_tx, closed_rx) = tokio::sync::oneshot::channel::<()>();
     if control_stdin {
-        tokio::spawn(control_from_stdin(rx.handle.clone(), settings_path));
+        let handle = rx.handle.clone();
+        tokio::spawn(async move {
+            control_from_stdin(handle, settings_path).await;
+            let _ = closed_tx.send(());
+        });
     }
-    castable_net::run(rx, backend, async {
-        let _ = tokio::signal::ctrl_c().await;
+    castable_net::run(rx, backend, async move {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            Ok(()) = closed_rx => tracing::info!("control input closed: stopping"),
+        }
     })
     .await;
     Ok(())
@@ -322,7 +333,7 @@ async fn main() -> std::io::Result<()> {
 /// line is a player key (`play-pause`, `seek-back`, `volume-up`, ... see
 /// `castable_core::keys`), acted on with what's shown now, or `rename NAME`:
 /// renamed live, saved to the settings, and logged as `renamed` (or, refused,
-/// as `rename refused` with the reason).
+/// as `rename refused` with the reason). Returns when the input closes.
 async fn control_from_stdin(handle: Handle, settings: Option<PathBuf>) {
     use tokio::io::AsyncBufReadExt;
     let mut lines = tokio::io::BufReader::new(tokio::io::stdin()).lines();
