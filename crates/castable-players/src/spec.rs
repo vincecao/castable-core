@@ -118,6 +118,19 @@ impl PlayerSpec {
                     Arg::One(w) => std::slice::from_ref(w),
                     Arg::Group(ws) => ws,
                 };
+                // `{header}`: the argument (or group) once per header.
+                if words.iter().any(|w| placeholders(w).any(|p| p == EACH_HEADER)) {
+                    let all = vars.get(EACH_HEADER).map(String::as_str).unwrap_or_default();
+                    return all
+                        .lines()
+                        .filter(|h| !h.is_empty())
+                        .flat_map(|h| {
+                            let mut one = vars.clone();
+                            one.insert(EACH_HEADER, h.to_owned());
+                            words.iter().map(|w| fill(w, &one)).collect::<Option<Vec<String>>>().unwrap_or_default()
+                        })
+                        .collect();
+                }
                 let filled: Option<Vec<String>> = words.iter().map(|w| fill(w, vars)).collect();
                 filled.unwrap_or_default()
             })
@@ -168,7 +181,11 @@ fn split(line: &str) -> Result<Vec<String>, String> {
     shell_words::split(line).map_err(|e| format!("player command {line:?}: {e}"))
 }
 
-const KNOWN: &[&str] = &["url", "title", "referer", "user_agent", "headers", "font", "ipc", "port", "password"];
+const KNOWN: &[&str] =
+    &["url", "title", "referer", "user_agent", "header", "headers", "font", "ipc", "port", "password"];
+
+/// `{header}` holds every header, one per line; an argument using it is repeated per header.
+pub const EACH_HEADER: &str = "header";
 
 fn placeholders(word: &str) -> impl Iterator<Item = &str> {
     word.split('{').skip(1).filter_map(|rest| rest.split_once('}').map(|(name, _)| name))

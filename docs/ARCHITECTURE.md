@@ -133,7 +133,9 @@ stopped: the position stays). A newer timer, or `minutes: null`, replaces it.
 `ScreenAction` for what is shown now (nothing when it can't apply: a seek on live media, the
 slowest speed). The apps' UI builds the same actions itself, from the same numbers, because it shows
 them ahead of the view; screens that only send keys use `Handle::key`. The CLI's status screen
-does, through `castable-receiver --control stdin` (one key name per line).
+does, through `castable-receiver --control stdin` (one key name per line). Closing that input
+stops the receiver as Ctrl-C does (goodbye on the network, player closed): the CLI stops it that
+way on every platform, since Windows has no Ctrl-C to send.
 
 The transitions are pure functions, `Phase::on_sender(self, cmd) -> (Phase, Result<Vec<PlayerCommand>, UpnpError>)`
 and `Phase::on_player(self, ev) -> (Phase, Vec<PlayerCommand>)`. A refusal returns the phase
@@ -189,6 +191,17 @@ sequenceDiagram
 **The actor** (`actor.rs`) is the only owner of the `Session`. HTTP handlers and the player send it
 messages over channels; it applies them in order, so there are no locks and no races on state.
 
+**What a sender may ask** (anyone on the network can, unauthenticated):
+- `SetAVTransportURI` takes only `http://` and `https://` URLs with a host (`renderer::is_web_url`);
+  anything else (`file://`, app schemes, a leading `-`) is `InvalidArgs`, since the URL goes to a
+  player and to `open`.
+- A new GENA subscription's CALLBACK must be the subscriber's own address, or it's refused (412):
+  NOTIFYs aimed elsewhere would let any host point the receiver at other machines or its own
+  localhost services (CallStranger). At most 32 subscriptions, 8 per address.
+- NOTIFYs go out per subscriber, in order, each from its own small queue: one slow or unreachable
+  phone doesn't delay the others, and three failures in a row (or a full queue) drop it. The
+  initial event waits 200 ms, so it arrives after the SUBSCRIBE reply that carries its SID.
+
 **The `Player` seam** (`player.rs`) is how anything plays video:
 
 ```rust
@@ -217,7 +230,7 @@ Desktop players are **data, not code**. `crates/castable-players/players.toml` l
 description = "mpv: plays almost anything, full control"
 program = ["mpv", "C:\\Program Files\\mpv\\mpv.exe"]   # first one found is used
 args = ["--pause", "--force-window=immediate", "--keep-open=no", "--input-ipc-server={ipc}",
-        "--force-media-title={title}", "--http-header-fields={headers}", "{url}"]
+        "--force-media-title={title}", "--http-header-fields-append={header}", "--", "{url}"]
 control = "mpv-ipc"   # mpv-ipc | vlc-http | launch
 ```
 
@@ -233,7 +246,10 @@ status's stream list. Each reports `PlayerEvent::Info` once a burst of changes s
 when something notable changed (`MediaInfo::differs_notably`: any field, or a bitrate moving more
 than 25%), so a wobbling bitrate doesn't flood the log.
 
-Placeholders: `{url} {title} {referer} {user_agent} {headers} {ipc} {port} {password}`. An argument
+Placeholders: `{url} {title} {referer} {user_agent} {header} {headers} {ipc} {port} {password}`.
+`{header}` repeats its argument (or group) once per header, so a comma in a value can't split it;
+headers with a line break are left out. mpv's IPC socket sits in a private (0700) folder made per
+run under `$XDG_RUNTIME_DIR` or the temp folder, and is removed when the player closes. An argument
 whose placeholder has no value is left out; a group such as `["-window_title", "{title}"]` is dropped whole. Specs are validated on load
 (unknown placeholder, missing `{url}`, a control that needs `{ipc}` or `{port}`), and errors name
 the player. Users extend or override the list in their own `players.toml` in the config folder.

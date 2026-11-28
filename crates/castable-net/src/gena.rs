@@ -6,11 +6,40 @@
 
 use castable_core::Service;
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(1800);
 const MIN_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_TIMEOUT: Duration = Duration::from_secs(7200);
+/// At most this many live subscriptions, and this many from one address, so
+/// one host on the network can't grow the table (and every NOTIFY fan-out)
+/// without bound. A phone needs one per service.
+pub const MAX_SUBSCRIPTIONS: usize = 32;
+pub const MAX_PER_HOST: usize = 8;
+
+/// Why a SUBSCRIBE was refused (all answered 412 Precondition Failed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refused {
+    /// A renewal named a SID that isn't (or is no longer) subscribed.
+    UnknownSid,
+    /// The CALLBACK isn't the subscriber's own address. Sending NOTIFYs
+    /// elsewhere would let any host aim the receiver at other machines or its
+    /// own localhost services (CallStranger, CVE-2020-12695).
+    NotYourAddress,
+    /// Too many subscriptions, in all or from this address.
+    TooMany,
+}
+
+impl Refused {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::UnknownSid => "unknown_sid",
+            Self::NotYourAddress => "callback_not_subscriber",
+            Self::TooMany => "too_many",
+        }
+    }
+}
 
 /// A subscriber's callback, parsed from `CALLBACK: <http://host:port/path>`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -122,20 +151,39 @@ pub struct Subscriptions {
 }
 
 impl Subscriptions {
-    /// Adds a subscription or renews one. Returns the SID and granted timeout,
-    /// or `None` when a renewal names an unknown SID (412).
-    pub fn subscribe(&mut self, service: Service, req: SubscribeRequest, now: Instant) -> Option<(String, Duration)> {
+    /// Adds a subscription for `peer` (the address the request came from) or
+    /// renews one. Returns the SID and granted timeout, or why it was refused.
+    pub fn subscribe(
+        &mut self,
+        service: Service,
+        req: SubscribeRequest,
+        peer: IpAddr,
+        now: Instant,
+    ) -> Result<(String, Duration), Refused> {
         match req {
             SubscribeRequest::New { callback, timeout } => {
+                let peer = peer.to_canonical();
+                if callback.host.parse::<IpAddr>().map(|ip| ip.to_canonical()) != Ok(peer) {
+                    return Err(Refused::NotYourAddress);
+                }
+                self.by_sid.retain(|_, s| s.expires > now);
+                let from_peer = self.by_sid.values().filter(|s| s.callback.host == callback.host).count();
+                if self.by_sid.len() >= MAX_SUBSCRIPTIONS || from_peer >= MAX_PER_HOST {
+                    return Err(Refused::TooMany);
+                }
                 let sid = format!("uuid:{}", uuid::Uuid::new_v4());
                 let sub = Subscription { sid: sid.clone(), service, callback, expires: now + timeout, seq: 0 };
                 self.by_sid.insert(sid.clone(), sub);
-                Some((sid, timeout))
+                Ok((sid, timeout))
             }
             SubscribeRequest::Renew { sid, timeout } => {
-                let sub = self.by_sid.get_mut(&sid).filter(|s| s.service == service && s.expires > now)?;
+                let sub = self
+                    .by_sid
+                    .get_mut(&sid)
+                    .filter(|s| s.service == service && s.expires > now)
+                    .ok_or(Refused::UnknownSid)?;
                 sub.expires = now + timeout;
-                Some((sid, timeout))
+                Ok((sid, timeout))
             }
         }
     }
@@ -164,6 +212,43 @@ impl Subscriptions {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const PEER: IpAddr = IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 20));
+
+    #[test]
+    fn a_callback_must_be_the_subscribers_own_address() {
+        let mut subs = Subscriptions::default();
+        let t0 = Instant::now();
+        let elsewhere = IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 99));
+        assert_eq!(subs.subscribe(Service::AvTransport, new_req(), elsewhere, t0), Err(Refused::NotYourAddress));
+        let localhost =
+            SubscribeRequest::from_headers(Some("<http://127.0.0.1:8080/>"), Some("upnp:event"), None, None).unwrap();
+        assert_eq!(subs.subscribe(Service::AvTransport, localhost, PEER, t0), Err(Refused::NotYourAddress));
+        // An IPv4 peer seen as IPv4-mapped IPv6 is the same address.
+        let mapped = IpAddr::V6(std::net::Ipv4Addr::new(192, 0, 2, 20).to_ipv6_mapped());
+        assert!(subs.subscribe(Service::AvTransport, new_req(), mapped, t0).is_ok());
+    }
+
+    #[test]
+    fn subscriptions_are_capped_per_host_and_in_all() {
+        let mut subs = Subscriptions::default();
+        let t0 = Instant::now();
+        for _ in 0..MAX_PER_HOST {
+            assert!(subs.subscribe(Service::AvTransport, new_req(), PEER, t0).is_ok());
+        }
+        assert_eq!(subs.subscribe(Service::AvTransport, new_req(), PEER, t0), Err(Refused::TooMany));
+        // Expired ones don't count.
+        assert!(subs.subscribe(Service::AvTransport, new_req(), PEER, t0 + Duration::from_secs(400)).is_ok());
+        let mut all = Subscriptions::default();
+        for i in 0..MAX_SUBSCRIPTIONS {
+            let host = format!("192.0.2.{}", 100 + i);
+            let req =
+                SubscribeRequest::from_headers(Some(&format!("<http://{host}:4000/>")), Some("upnp:event"), None, None)
+                    .unwrap();
+            assert!(all.subscribe(Service::AvTransport, req, host.parse().unwrap(), t0).is_ok());
+        }
+        assert_eq!(all.subscribe(Service::AvTransport, new_req(), PEER, t0), Err(Refused::TooMany));
+    }
 
     fn new_req() -> SubscribeRequest {
         SubscribeRequest::from_headers(
@@ -199,17 +284,20 @@ mod tests {
     fn sequence_renewal_and_expiry() {
         let t0 = Instant::now();
         let mut subs = Subscriptions::default();
-        let (sid, _) = subs.subscribe(Service::AvTransport, new_req(), t0).unwrap();
+        let (sid, _) = subs.subscribe(Service::AvTransport, new_req(), PEER, t0).unwrap();
         let first = subs.deliveries(Service::AvTransport, None, "<e/>", t0);
         let second = subs.deliveries(Service::AvTransport, None, "<e/>", t0);
         assert_eq!((first[0].seq, second[0].seq), (0, 1));
         assert!(subs.deliveries(Service::RenderingControl, None, "<e/>", t0).is_empty());
 
         let renew = SubscribeRequest::Renew { sid: sid.clone(), timeout: Duration::from_secs(300) };
-        assert!(subs.subscribe(Service::AvTransport, renew.clone(), t0 + Duration::from_secs(200)).is_some());
+        assert!(subs.subscribe(Service::AvTransport, renew.clone(), PEER, t0 + Duration::from_secs(200)).is_ok());
         assert_eq!(subs.deliveries(Service::AvTransport, None, "<e/>", t0 + Duration::from_secs(400)).len(), 1);
         assert!(subs.deliveries(Service::AvTransport, None, "<e/>", t0 + Duration::from_secs(600)).is_empty());
-        assert!(subs.subscribe(Service::AvTransport, renew, t0 + Duration::from_secs(600)).is_none());
+        assert_eq!(
+            subs.subscribe(Service::AvTransport, renew, PEER, t0 + Duration::from_secs(600)),
+            Err(Refused::UnknownSid)
+        );
     }
 
     #[test]

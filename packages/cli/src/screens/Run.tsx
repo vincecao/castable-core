@@ -55,7 +55,7 @@ function playerKey(input: string, key: Key): sys.PlayerKey | null {
   if (key.leftArrow) return key.shift ? "step-back" : "seek-back";
   if (key.rightArrow) return key.shift ? "step-forward" : "seek-forward";
   if (input === "j") return "jump-back";
-  if (input === "l" && key.shift) return "jump-forward"; // plain l opens the log here
+  if (input === "L") return "jump-forward"; // Shift+L (Ink gives "L"); plain l opens the log here
   if (key.upArrow) return "volume-up";
   if (key.downArrow) return "volume-down";
   if (input === "m") return "mute";

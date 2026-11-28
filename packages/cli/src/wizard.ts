@@ -1,7 +1,7 @@
 // The setup wizard as data: a discriminated union of steps and one pure
 // reducer. No I/O and no rendering here, so every key path is unit-tested.
 
-import { PREFERRED_PORT } from "@castable/protocol";
+import { MAX_NAME_CHARS, PREFERRED_PORT } from "@castable/protocol";
 import type { Control } from "./control.ts";
 
 export interface PlayerInfo {
@@ -114,8 +114,10 @@ export function reduce(state: State, key: Key): State {
         case "erase":
           return go({ kind: "name", value: step.value.slice(0, -1) });
         case "enter": {
-          const name = step.value.trim();
+          // As the receiver cleans it (castable_core::device::friendly_name).
+          const name = step.value.trim().split(/\s+/).filter(Boolean).join(" ");
           if (!name) return fail("Type a name phones will show, such as Living room.");
+          if ([...name].length > MAX_NAME_CHARS) return fail(`Keep the name to ${MAX_NAME_CHARS} characters.`);
           const cursor = Math.max(0, choices.findIndex((c) => c.name === draft.player));
           return go({ kind: "player", cursor }, { name });
         }

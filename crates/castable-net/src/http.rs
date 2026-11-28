@@ -59,7 +59,7 @@ pub async fn handle(
         Route::Description => xml(StatusCode::OK, ctx.device.borrow().description_xml()),
         Route::Scpd(service) => xml(StatusCode::OK, service.scpd()),
         Route::Control(service) => control(service, req, &ctx, peer).await,
-        Route::Subscribe(service) => subscribe(service, &req, &ctx).await,
+        Route::Subscribe(service) => subscribe(service, &req, &ctx, peer).await,
         Route::Unsubscribe => unsubscribe(&req, &ctx).await,
         Route::NotFound => empty(StatusCode::NOT_FOUND),
     };
@@ -109,7 +109,8 @@ fn header<'a>(req: &'a Request<Incoming>, name: &str) -> Option<&'a str> {
     req.headers().get(name).and_then(|v| v.to_str().ok())
 }
 
-async fn subscribe(service: Service, req: &Request<Incoming>, ctx: &Ctx) -> Resp {
+/// SUBSCRIBE: `peer` is where it came from; a new subscription's CALLBACK must point there.
+async fn subscribe(service: Service, req: &Request<Incoming>, ctx: &Ctx, peer: std::net::SocketAddr) -> Resp {
     let Some(sub) = SubscribeRequest::from_headers(
         header(req, "callback"),
         header(req, "nt"),
@@ -119,7 +120,7 @@ async fn subscribe(service: Service, req: &Request<Incoming>, ctx: &Ctx) -> Resp
         return empty(StatusCode::PRECONDITION_FAILED);
     };
     let (reply, rx) = oneshot::channel();
-    if ctx.actor.send(Msg::Subscribe { service, req: sub, reply }).is_err() {
+    if ctx.actor.send(Msg::Subscribe { service, req: sub, peer: peer.ip(), reply }).is_err() {
         return empty(StatusCode::INTERNAL_SERVER_ERROR);
     }
     match rx.await.ok().flatten() {

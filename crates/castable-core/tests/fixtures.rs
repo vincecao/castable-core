@@ -150,8 +150,12 @@ fn views_match_the_fixture() {
 
 fn protocol() -> String {
     let media = MediaDescriptor::video("http://192.0.2.10/e1.mp4");
+    // A start position, so its field name is checked against the TypeScript types.
+    let mut resume = MediaDescriptor::video("http://192.0.2.10/e2.mp4");
+    resume.delivery = Delivery::OnDemand { start_at_secs: Some(90.5) };
     let commands = vec![
         PlayerCommand::Load { gen: Gen(1), media: media.clone() },
+        PlayerCommand::Load { gen: Gen(2), media: resume },
         PlayerCommand::Play,
         PlayerCommand::Pause,
         PlayerCommand::Stop,
@@ -281,4 +285,9 @@ fn descriptor_round_trips_through_json() {
     let m: MediaDescriptor = serde_json::from_str(json).unwrap();
     assert!(m.is_live());
     assert_eq!(serde_json::to_string(&m).unwrap(), json);
+    // A start position goes over the wire in camelCase, as `packages/protocol` declares it.
+    let resume = r#"{"url":"https://media.example.com/e1.mp4","kind":"video","delivery":{"type":"onDemand","startAtSecs":90.5}}"#;
+    let m: MediaDescriptor = serde_json::from_str(resume).unwrap();
+    assert_eq!(m.delivery, Delivery::OnDemand { start_at_secs: Some(90.5) });
+    assert_eq!(serde_json::to_string(&m).unwrap(), resume);
 }

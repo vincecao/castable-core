@@ -53,11 +53,16 @@ pub fn load(media: &MediaDescriptor) -> Vec<String> {
         .headers
         .iter()
         .filter(|(k, _)| !k.eq_ignore_ascii_case("user-agent") && !k.eq_ignore_ascii_case("referer"))
+        .filter(|(k, v)| !(k.contains(['\r', '\n']) || v.contains(['\r', '\n'])))
         .map(|(k, v)| format!("{k}: {v}"))
         .collect();
     vec![
         set("pause", true.into()),
         set("speed", 1.into()),
+        // Track choices are options in mpv and would carry over to the next file.
+        set("aid", "auto".into()),
+        set("vid", "auto".into()),
+        set("sid", "auto".into()),
         set("user-agent", header("user-agent").unwrap_or("libmpv").into()),
         set("referrer", header("referer").unwrap_or("").into()),
         set("http-header-fields", fields.into()),
@@ -66,13 +71,42 @@ pub fn load(media: &MediaDescriptor) -> Vec<String> {
     ]
 }
 
-/// Where a player's IPC endpoint lives: a Unix socket, or a named pipe on Windows.
+/// Where a player's IPC endpoint lives: a socket in this run's private
+/// folder ([`private_dir`]), or a named pipe on Windows. Remove the socket
+/// when the player closes (a killed mpv can't).
 pub fn endpoint(session_id: &str) -> PathBuf {
     if cfg!(windows) {
-        PathBuf::from(format!(r"\\.\pipe\castable-{session_id}"))
+        PathBuf::from(format!(r"\\.\pipe\castable-{session_id}-{}", uuid::Uuid::new_v4().simple()))
     } else {
-        std::env::temp_dir().join(format!("castable-{session_id}.sock"))
+        private_dir().join(format!("{session_id}.sock"))
     }
+}
+
+/// A folder only this user can open (0700), made once per run under
+/// `$XDG_RUNTIME_DIR` or the temp folder, with a random name: another local
+/// user can't guess it, create it first, or put a socket of theirs in it.
+#[cfg(unix)]
+pub fn private_dir() -> PathBuf {
+    use std::os::unix::fs::DirBuilderExt;
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let base = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+        for _ in 0..8 {
+            // Short, so socket paths stay under the 104-byte limit.
+            let id = uuid::Uuid::new_v4().simple().to_string();
+            let dir = base.join(format!("castable-{}", &id[..12]));
+            if std::fs::DirBuilder::new().mode(0o700).create(&dir).is_ok() {
+                return dir;
+            }
+        }
+        base
+    })
+    .clone()
+}
+
+#[cfg(not(unix))]
+pub fn private_dir() -> PathBuf {
+    std::env::temp_dir()
 }
 
 #[cfg(unix)]
@@ -428,6 +462,17 @@ mod tests {
         assert_eq!(read(json!({"event":"end-file","reason":"stop"})), None);
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn sockets_go_in_a_private_folder() {
+        use std::os::unix::fs::PermissionsExt;
+        let socket = endpoint("1-1");
+        let dir = socket.parent().unwrap();
+        assert_eq!(std::fs::metadata(dir).unwrap().permissions().mode() & 0o777, 0o700);
+        assert_eq!(endpoint("1-2").parent(), Some(dir), "one folder per run");
+        assert!(socket.as_os_str().len() < 104, "{}", socket.display());
+    }
+
     #[test]
     fn a_load_sets_every_option_then_opens_the_file_paused() {
         let mut media = MediaDescriptor::from_url_and_mime("https://media.example.com/e1.m3u8", None);
@@ -437,11 +482,20 @@ mod tests {
         let msgs: Vec<serde_json::Value> = load(&media).iter().map(|m| serde_json::from_str(m).unwrap()).collect();
         assert_eq!(msgs[0], json!({"command":["set_property","pause",true]}));
         assert_eq!(msgs[1], json!({"command":["set_property","speed",1]}));
-        assert_eq!(msgs[2], json!({"command":["set_property","user-agent","libmpv"]}));
-        assert_eq!(msgs[3], json!({"command":["set_property","referrer","https://media.example.com/"]}));
-        assert_eq!(msgs[4], json!({"command":["set_property","http-header-fields",["X-Token: abc"]]}));
-        assert_eq!(msgs[5], json!({"command":["set_property","force-media-title","Episode 1"]}));
-        assert_eq!(msgs[6], json!({"command":["loadfile","https://media.example.com/e1.m3u8","replace"]}));
+        // Track choices are reset, so the last cast's subtitles-off or audio track 2 doesn't carry over.
+        assert_eq!(
+            msgs[2..5],
+            [
+                json!({"command":["set_property","aid","auto"]}),
+                json!({"command":["set_property","vid","auto"]}),
+                json!({"command":["set_property","sid","auto"]})
+            ]
+        );
+        assert_eq!(msgs[5], json!({"command":["set_property","user-agent","libmpv"]}));
+        assert_eq!(msgs[6], json!({"command":["set_property","referrer","https://media.example.com/"]}));
+        assert_eq!(msgs[7], json!({"command":["set_property","http-header-fields",["X-Token: abc"]]}));
+        assert_eq!(msgs[8], json!({"command":["set_property","force-media-title","Episode 1"]}));
+        assert_eq!(msgs[9], json!({"command":["loadfile","https://media.example.com/e1.m3u8","replace"]}));
     }
 
     #[test]
