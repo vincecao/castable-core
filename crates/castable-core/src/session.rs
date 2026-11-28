@@ -17,6 +17,7 @@ use crate::descriptor::MediaDescriptor;
 use crate::error::UpnpError;
 use crate::errors::CastError;
 use crate::media_info::MediaInfo;
+use crate::tracks::{self, MediaTrack, TrackKind};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -35,7 +36,14 @@ pub struct Cast {
     pub duration: Option<Duration>,
     /// What the player reported about the media (resolution, codecs, ...).
     pub info: MediaInfo,
+    /// Playback speed (1.0 is normal).
+    pub rate: f64,
+    /// The tracks the player found, with the selected ones marked.
+    pub tracks: Vec<MediaTrack>,
 }
+
+/// The speeds a screen may set.
+pub const RATES: std::ops::RangeInclusive<f64> = 0.25..=4.0;
 
 /// What to do once loading finishes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,6 +127,11 @@ pub enum PhaseView<'a> {
         /// A short quality badge from `info`: "1080p · HDR10".
         #[serde(skip_serializing_if = "Option::is_none")]
         quality_label: Option<String>,
+        /// Playback speed (1 is normal).
+        rate: f64,
+        /// The tracks the player found; empty until it reports them.
+        #[serde(skip_serializing_if = "<[_]>::is_empty")]
+        tracks: &'a [MediaTrack],
     },
     Unloaded {
         media: &'a MediaDescriptor,
@@ -209,6 +222,11 @@ pub enum PlayerEvent {
     Closed {
         gen: Gen,
     },
+    /// The tracks in the media, with the selected ones marked; again whenever they change.
+    Tracks {
+        gen: Gen,
+        tracks: Vec<MediaTrack>,
+    },
 }
 
 impl PlayerEvent {
@@ -221,6 +239,7 @@ impl PlayerEvent {
             PlayerEvent::Ended { .. } => "ended",
             PlayerEvent::Closed { .. } => "closed",
             PlayerEvent::Info { .. } => "info",
+            PlayerEvent::Tracks { .. } => "tracks",
         }
     }
 
@@ -231,7 +250,8 @@ impl PlayerEvent {
             | PlayerEvent::Progress { gen, .. }
             | PlayerEvent::Ended { gen }
             | PlayerEvent::Closed { gen }
-            | PlayerEvent::Info { gen, .. } => *gen,
+            | PlayerEvent::Info { gen, .. }
+            | PlayerEvent::Tracks { gen, .. } => *gen,
         }
     }
 }
@@ -249,12 +269,82 @@ impl SenderCommand {
     }
 }
 
+/// What a press on the receiver's own screen asks for: what a phone can ask
+/// (play, pause, stop, seek), and what only the screen offers.
+/// JSON: `{"type":"pause"}`, `{"type":"setRate","rate":1.5}`,
+/// `{"type":"selectTrack","kind":"audio","id":"2"}`, `{"type":"setSleepTimer","minutes":30}`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ScreenAction {
+    Play,
+    Pause,
+    Stop,
+    Seek {
+        #[serde(rename = "toSecs", with = "crate::time::secs")]
+        to: Duration,
+    },
+    /// Leave the video: back to the waiting screen (the back button).
+    Close,
+    /// 0..=100.
+    SetVolume {
+        volume: u8,
+    },
+    SetMuted {
+        muted: bool,
+    },
+    /// Playback speed, within [`RATES`].
+    SetRate {
+        rate: f64,
+    },
+    /// `id: null`: subtitles off, or video back on automatic.
+    SelectTrack {
+        kind: TrackKind,
+        #[serde(default)]
+        id: Option<String>,
+    },
+    /// Stop after this many minutes; `null` cancels. The receiver keeps the
+    /// clock (`castable-net`); the session never reads one.
+    SetSleepTimer {
+        #[serde(default)]
+        minutes: Option<u32>,
+    },
+}
+
+impl ScreenAction {
+    /// The press as a phone's command, when a phone could have sent it.
+    pub fn as_sender(&self) -> Option<SenderCommand> {
+        Some(match self {
+            ScreenAction::Play => SenderCommand::Play,
+            ScreenAction::Pause => SenderCommand::Pause,
+            ScreenAction::Stop => SenderCommand::Stop,
+            ScreenAction::Seek { to } => SenderCommand::Seek { to: *to },
+            _ => return None,
+        })
+    }
+
+    /// Short name for logs.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            ScreenAction::Play => "play",
+            ScreenAction::Pause => "pause",
+            ScreenAction::Stop => "stop",
+            ScreenAction::Seek { .. } => "seek",
+            ScreenAction::Close => "close",
+            ScreenAction::SetVolume { .. } => "volume",
+            ScreenAction::SetMuted { .. } => "mute",
+            ScreenAction::SetRate { .. } => "rate",
+            ScreenAction::SelectTrack { .. } => "track",
+            ScreenAction::SetSleepTimer { .. } => "sleep_timer",
+        }
+    }
+}
+
 /// A press on the receiver's own screen, made while it showed cast `gen`.
 /// JSON: `{"gen":1,"command":{"type":"pause"}}`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScreenCommand {
     pub gen: Gen,
-    pub command: SenderCommand,
+    pub command: ScreenAction,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -289,6 +379,17 @@ pub enum PlayerCommand {
     },
     SetMuted {
         muted: bool,
+    },
+    /// Playback speed (1.0 is normal).
+    SetRate {
+        rate: f64,
+    },
+    /// Select the track `id` of `kind` (an id from the player's own `tracks`
+    /// event); `None` turns subtitles off, or puts video back on automatic.
+    SelectTrack {
+        kind: TrackKind,
+        #[serde(default)]
+        id: Option<String>,
     },
 }
 
@@ -350,6 +451,8 @@ impl Session {
                 duration_secs: cast.duration.map(|d| d.as_secs_f64()),
                 info: Some(&cast.info).filter(|i| !i.is_empty()),
                 quality_label: cast.info.short_label(),
+                rate: cast.rate,
+                tracks: &cast.tracks,
             },
             Phase::Unloaded { cast, why } => PhaseView::Unloaded {
                 media: &cast.media,
@@ -384,7 +487,7 @@ impl Session {
             // A press made on a cast that has since been replaced is dropped:
             // it was meant for a video that is no longer there.
             Input::Screen(press) if phase.cast().map(|c| c.gen) != Some(press.gen) => (phase, Ok(vec![])),
-            Input::Screen(press) => phase.on_sender(press.command, &mut self.last_gen),
+            Input::Screen(press) => phase.on_screen(press.command, &mut self.last_gen),
             Input::Player(ev) => {
                 let (phase, commands) = phase.on_player(ev);
                 (phase, Ok(commands))
@@ -405,8 +508,15 @@ impl Phase {
     fn load(media: MediaDescriptor, then: AfterLoad, last_gen: &mut u64) -> (Phase, Vec<PlayerCommand>) {
         *last_gen += 1;
         let gen = Gen(*last_gen);
-        let cast =
-            Cast { gen, media: media.clone(), position: Duration::ZERO, duration: None, info: MediaInfo::default() };
+        let cast = Cast {
+            gen,
+            media: media.clone(),
+            position: Duration::ZERO,
+            duration: None,
+            info: MediaInfo::default(),
+            rate: 1.0,
+            tracks: Vec::new(),
+        };
         (Phase::Loading { cast, then }, vec![PlayerCommand::Load { gen, media }])
     }
 
@@ -471,6 +581,37 @@ impl Phase {
         }
     }
 
+    /// A screen press. Transport presses act as a phone's would; the rest
+    /// are the screen's own. Volume and the sleep timer aren't the cast's:
+    /// the renderer and the receiver handle them before they get here.
+    fn on_screen(self, action: ScreenAction, last_gen: &mut u64) -> (Phase, Result<Vec<PlayerCommand>, UpnpError>) {
+        use ScreenAction as A;
+        if let Some(cmd) = action.as_sender() {
+            return self.on_sender(cmd, last_gen);
+        }
+        match (self, action) {
+            (phase, A::Play | A::Pause | A::Stop | A::Seek { .. }) => {
+                unreachable!("handled as a phone's command: {phase:?}")
+            }
+            // Back to waiting: whatever was loaded or loading is stopped.
+            (Phase::Idle, A::Close) => (Phase::Idle, Ok(vec![])),
+            (Phase::Unloaded { .. }, A::Close) => (Phase::Idle, Ok(vec![])),
+            (Phase::Loading { .. } | Phase::Loaded { .. }, A::Close) => (Phase::Idle, Ok(vec![PlayerCommand::Stop])),
+            (Phase::Loaded { mut cast, playback }, A::SetRate { rate }) if RATES.contains(&rate) => {
+                cast.rate = rate;
+                (Phase::Loaded { cast, playback }, Ok(vec![PlayerCommand::SetRate { rate }]))
+            }
+            (phase, A::SetRate { .. }) => (phase, Err(UpnpError::InvalidArgs)),
+            (Phase::Loaded { mut cast, playback }, A::SelectTrack { kind, id }) => {
+                tracks::select(&mut cast.tracks, kind, id.as_deref());
+                (Phase::Loaded { cast, playback }, Ok(vec![PlayerCommand::SelectTrack { kind, id }]))
+            }
+            (phase, A::SelectTrack { .. }) => (phase, Err(UpnpError::TransitionNotAvailable)),
+            // Not the cast's (see above): nothing for the session to do.
+            (phase, A::SetVolume { .. } | A::SetMuted { .. } | A::SetSleepTimer { .. }) => (phase, Ok(vec![])),
+        }
+    }
+
     fn on_player(self, ev: PlayerEvent) -> (Phase, Vec<PlayerCommand>) {
         // Events from an older load are dropped here, in one place.
         if self.cast().map(|c| c.gen) != Some(ev.gen()) {
@@ -520,6 +661,14 @@ impl Phase {
             }
             (Phase::Loaded { mut cast, playback }, PlayerEvent::Info { info, .. }) => {
                 cast.info.merge(&info);
+                (Phase::Loaded { cast, playback }, vec![])
+            }
+            (Phase::Loading { mut cast, then }, PlayerEvent::Tracks { tracks, .. }) => {
+                cast.tracks = tracks;
+                (Phase::Loading { cast, then }, vec![])
+            }
+            (Phase::Loaded { mut cast, playback }, PlayerEvent::Tracks { tracks, .. }) => {
+                cast.tracks = tracks;
                 (Phase::Loaded { cast, playback }, vec![])
             }
             // The player is gone: nothing is loaded, so Play loads it again.

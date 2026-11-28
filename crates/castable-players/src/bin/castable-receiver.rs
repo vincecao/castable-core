@@ -9,6 +9,8 @@
 //! RUST_LOG=debug castable-receiver                    # every request and poll
 //! castable-receiver --log json                        # one JSON object per line
 //! castable-receiver --report                          # a report to attach to an issue
+//! castable-receiver --control stdin                   # player keys, one per line ("seek-back"),
+//!                                                     # or "rename NAME" (saved to the settings)
 //! ```
 //!
 //! Every run also writes a detailed log (player output included) to
@@ -28,7 +30,8 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 
 const USAGE: &str = "castable-receiver [--name NAME] [--player NAME|'COMMAND {url}'|log] [--port PORT]
                   [--log pretty|json] [--log-file PATH | --no-log-file] [--config PATH]
-                  [--players [--json]] [--print-config-path] [--report [PATH]]";
+                  [--players [--json]] [--print-config-path] [--print-default-name]
+                  [--report [PATH]] [--control stdin]";
 
 /// The chosen player: one from the registry, or none (log only).
 enum Backend {
@@ -65,10 +68,14 @@ struct Flags {
     list: bool,
     json: bool,
     print_config_path: bool,
+    /// `--print-default-name`: the name a fresh install shows (the setup wizard's suggestion).
+    print_default_name: bool,
     /// Where this run's detailed log goes; `None` with `--no-log-file`.
     log_file: Option<PathBuf>,
     /// `--report [PATH]`: write a report and exit.
     report: Option<Option<PathBuf>>,
+    /// `--control stdin`: read player keys (`castable_core::keys`), one name per line.
+    control_stdin: bool,
 }
 
 /// Prints the error with its code ("E703 config/player_unknown: …") and exits.
@@ -105,7 +112,9 @@ fn flags() -> Flags {
             "--name" => f.settings.name = Some(value()),
             "--player" => f.settings.player = Some(value()),
             "--mpv" => f.settings.player = Some("mpv".into()), // the older flag
-            "--port" => f.settings.port = value().parse().unwrap_or_else(|_| fail(bad_arg("--port needs a number"))),
+            "--port" => {
+                f.settings.port = Some(value().parse().unwrap_or_else(|_| fail(bad_arg("--port needs a number"))))
+            }
             "--log" => {
                 f.settings.log = match value().as_str() {
                     "json" => LogFormat::Json,
@@ -122,7 +131,12 @@ fn flags() -> Flags {
             "--players" => f.list = true,
             // For the setup wizard: where settings live on this OS, so it never guesses.
             "--print-config-path" => f.print_config_path = true,
+            "--print-default-name" => f.print_default_name = true,
             "--json" => f.json = true,
+            "--control" => match value().as_str() {
+                "stdin" => f.control_stdin = true,
+                other => fail(bad_arg(format!("--control takes stdin, not {other}"))),
+            },
             "-h" | "--help" => {
                 println!("{USAGE}");
                 std::process::exit(0);
@@ -194,7 +208,21 @@ fn pick(
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
-    let Flags { settings, config, list: show_list, json, print_config_path, log_file, report: report_to } = flags();
+    let Flags {
+        settings,
+        config,
+        list: show_list,
+        json,
+        print_config_path,
+        print_default_name,
+        log_file,
+        report: report_to,
+        control_stdin,
+    } = flags();
+    if print_default_name {
+        println!("{}", castable_net::profile::default_name());
+        return Ok(());
+    }
     if print_config_path {
         println!("{}", config.or_else(settings_file).map(|p| p.display().to_string()).unwrap_or_default());
         return Ok(());
@@ -244,11 +272,15 @@ async fn main() -> std::io::Result<()> {
         tracing::warn!(code = %ErrorCode::Io.id(), error = ErrorCode::Io.name(), detail = %e, path = %path.display(), "can't write the log file");
     }
 
-    let host =
-        std::env::var("HOSTNAME").or_else(|_| std::env::var("COMPUTERNAME")).unwrap_or_else(|_| "this computer".into());
-    let name = settings.name.clone().unwrap_or_else(|| format!("Castable ({host})"));
+    let name = settings.name.clone().unwrap_or_else(castable_net::profile::default_name);
+    let settings_path = config.clone().or_else(settings_file);
     let mut net = Config::named(&name);
-    net.http.set_port(settings.port);
+    // One id per install, beside the settings; older versions' name-derived id seeds it.
+    net.uuid = settings_path
+        .as_deref()
+        .and_then(std::path::Path::parent)
+        .map(|dir| castable_net::profile::device_id(dir, Some(castable_net::profile::legacy_id(&name))));
+    net.http.set_port(settings.port.unwrap_or(castable_net::PREFERRED_PORT));
     let rx = castable_net::start(net).await.unwrap_or_else(|e| {
         let code = match e.kind() {
             std::io::ErrorKind::AddrInUse => ErrorCode::PortInUse,
@@ -261,13 +293,13 @@ async fn main() -> std::io::Result<()> {
     let (backend, control) =
         pick(settings.player.as_deref(), &registry, rx.handle.clone(), settings.font()).unwrap_or_else(|e| fail(e));
     let ip = castable_net::local_ip().map_or_else(|| "?".into(), |ip| ip.to_string());
-    let settings_path = config.or_else(settings_file).map(|p| p.display().to_string()).unwrap_or_default();
+    let settings_shown = settings_path.as_deref().map(|p| p.display().to_string()).unwrap_or_default();
     tracing::info!(
         name = %name,
         player = settings.player.as_deref().unwrap_or("log"),
         control,
         url = %format!("http://{ip}:{}/desc.xml", rx.http_addr.port()),
-        settings = %settings_path,
+        settings = %settings_shown,
         log_file = %log_file.as_deref().map(|p| p.display().to_string()).unwrap_or_default(),
         "ready"
     );
@@ -275,9 +307,46 @@ async fn main() -> std::io::Result<()> {
         println!("\n  \"{name}\" is ready. Open a cast app on a phone on the same Wi-Fi and pick it.\n");
     }
 
+    if control_stdin {
+        tokio::spawn(control_from_stdin(rx.handle.clone(), settings_path));
+    }
     castable_net::run(rx, backend, async {
         let _ = tokio::signal::ctrl_c().await;
     })
     .await;
     Ok(())
+}
+
+/// `--control stdin`, for a front end such as the CLI's status screen. Each
+/// line is a player key (`play-pause`, `seek-back`, `volume-up`, ... see
+/// `castable_core::keys`), acted on with what's shown now, or `rename NAME`:
+/// renamed live, saved to the settings, and logged as `renamed` (or, refused,
+/// as `rename refused` with the reason).
+async fn control_from_stdin(handle: Handle, settings: Option<PathBuf>) {
+    use tokio::io::AsyncBufReadExt;
+    let mut lines = tokio::io::BufReader::new(tokio::io::stdin()).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        if let Some(name) = line.strip_prefix("rename ") {
+            rename(&handle, settings.as_deref(), name);
+            continue;
+        }
+        match castable_net::PlayerKey::parse(&line) {
+            Some(key) => handle.key(key),
+            None => tracing::warn!(line = %line.trim(), "not a player key"),
+        }
+    }
+}
+
+fn rename(handle: &Handle, settings: Option<&std::path::Path>, name: &str) {
+    match handle.rename(name) {
+        Ok(name) => {
+            if let Some(path) = settings {
+                if let Err(e) = Settings::save_name(path, &name) {
+                    tracing::warn!(code = %ErrorCode::Io.id(), error = ErrorCode::Io.name(), detail = %e, "can't save the new name; it lasts until the receiver stops");
+                }
+            }
+            tracing::info!(name = %name, "renamed");
+        }
+        Err(reason) => tracing::warn!(reason = ?reason, detail = %reason, "rename refused"),
+    }
 }

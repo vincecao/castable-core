@@ -11,3 +11,6 @@
 - Tests use made-up sources only: `media.example.com` / `cdn.example.com` hosts, `192.0.2.x`
   addresses, made-up app names (`ExampleCast`), English titles. For a real file to play, use
   `scripts/make-sample.sh` (a generated test pattern), never real content.
+- **No UI in this repo.** Screens, player controls, menus, key handling, styling and screen text
+  live in castable-universal (`packages/ui`). Here: the protocol a screen uses (`ScreenAction`, the
+  view's fields, `packages/protocol` types) and the session's reaction to it, nothing it draws.

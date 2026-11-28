@@ -34,6 +34,20 @@ export const protocol = {
     {
       "muted": true,
       "type": "setMuted"
+    },
+    {
+      "rate": 1.5,
+      "type": "setRate"
+    },
+    {
+      "id": "2",
+      "kind": "audio",
+      "type": "selectTrack"
+    },
+    {
+      "id": null,
+      "kind": "subtitle",
+      "type": "selectTrack"
     }
   ],
   "events": [
@@ -98,6 +112,53 @@ export const protocol = {
         }
       },
       "type": "info"
+    },
+    {
+      "gen": 1,
+      "tracks": [
+        {
+          "codec": "h264",
+          "height": 1080,
+          "id": "1",
+          "kind": "video",
+          "selected": true,
+          "width": 1920
+        },
+        {
+          "codec": "h264",
+          "height": 720,
+          "id": "2",
+          "kind": "video",
+          "selected": false,
+          "width": 1280
+        },
+        {
+          "channels": 2,
+          "codec": "aac",
+          "id": "1",
+          "kind": "audio",
+          "label": "English",
+          "lang": "en",
+          "selected": true
+        },
+        {
+          "channels": 6,
+          "codec": "ac3",
+          "id": "2",
+          "kind": "audio",
+          "label": "English (commentary)",
+          "lang": "en",
+          "selected": false
+        },
+        {
+          "codec": "subrip",
+          "id": "1",
+          "kind": "subtitle",
+          "lang": "en",
+          "selected": false
+        }
+      ],
+      "type": "tracks"
     }
   ],
   "screen": [
@@ -113,6 +174,55 @@ export const protocol = {
         "type": "seek"
       },
       "gen": 2
+    },
+    {
+      "command": {
+        "type": "close"
+      },
+      "gen": 1
+    },
+    {
+      "command": {
+        "type": "setVolume",
+        "volume": 35
+      },
+      "gen": 1
+    },
+    {
+      "command": {
+        "muted": true,
+        "type": "setMuted"
+      },
+      "gen": 1
+    },
+    {
+      "command": {
+        "rate": 1.25,
+        "type": "setRate"
+      },
+      "gen": 1
+    },
+    {
+      "command": {
+        "id": "2",
+        "kind": "video",
+        "type": "selectTrack"
+      },
+      "gen": 1
+    },
+    {
+      "command": {
+        "minutes": 30,
+        "type": "setSleepTimer"
+      },
+      "gen": 1
+    },
+    {
+      "command": {
+        "minutes": null,
+        "type": "setSleepTimer"
+      },
+      "gen": 1
     }
   ],
   "sender": [

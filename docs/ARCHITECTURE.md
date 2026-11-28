@@ -116,9 +116,24 @@ Inputs come from two sides and produce **`PlayerCommand`s** for whoever plays th
 | Input | Type | Comes from |
 | --- | --- | --- |
 | Sender commands | `SenderCommand` (`SetUri`, `Play`, `Pause`, `Stop`, `Seek`) | A phone, via SOAP. Volume and mute skip the session: the renderer turns them straight into `SetVolume` / `SetMuted` |
-| Screen presses | `ScreenCommand { gen, command }` | The receiver's own screen, remote or keyboard. `gen` is the cast the screen showed; a press on a replaced cast is dropped |
-| Player events | `PlayerEvent` (`Loaded`, `LoadFailed`, `Progress`, `Ended`, `Closed`, `Info`) — each tagged with a `Gen` | The player. `Closed`: it went away (process exited, window closed), so nothing is loaded. `Info`: what it found out about the media (`MediaInfo`: resolution, codecs, fps, bitrates, HDR, audio format, container, hardware decoder); merged into the cast and shown in the loaded view |
-| Output | `PlayerCommand` (`Load{gen,media}`, `Play`, `Pause`, `Stop`, `Seek`, `SetVolume`, `SetMuted`) | → the player |
+| Screen presses | `ScreenCommand { gen, command: ScreenAction }` | The receiver's own screen, remote or keyboard. `gen` is the cast the screen showed; a press on a replaced cast is dropped. `ScreenAction` is what a phone can ask (`Play`, `Pause`, `Stop`, `Seek`, handled exactly as a phone's) plus the screen's own: `Close` (the back button: back to `Idle`, stopping the player), `SetRate` (within `RATES`, 0.25–4), `SelectTrack { kind, id }`, and three that aren't the cast's: `SetVolume` / `SetMuted` (the renderer's mixer, as a phone's RenderingControl) and `SetSleepTimer { minutes }` (the receiver's clock, below) |
+| Player events | `PlayerEvent` (`Loaded`, `LoadFailed`, `Progress`, `Ended`, `Closed`, `Info`, `Tracks`) — each tagged with a `Gen` | The player. `Closed`: it went away (process exited, window closed), so nothing is loaded. `Info`: what it found out about the media (`MediaInfo`: resolution, codecs, fps, bitrates, HDR, audio format, container, decoder: a hardware one or `software`); merged into the cast and shown in the loaded view. `Tracks`: the audio, video and subtitle tracks (`MediaTrack`, ids are the player's own), selected ones marked |
+| Output | `PlayerCommand` (`Load{gen,media}`, `Play`, `Pause`, `Stop`, `Seek`, `SetVolume`, `SetMuted`, `SetRate`, `SelectTrack`) | → the player |
+
+A cast carries its speed (`rate`, 1 on every new cast) and its `tracks`; a `SelectTrack` marks the
+choice at once (the player's next `Tracks` confirms it). The screen draws `Renderer::view()`: the
+session's view plus the receiver-wide `volume`, `muted` and `sleepEndsAtMs`. The sleep timer is
+the one input that needs a clock, so `castable-net`'s actor keeps it: `SetSleepTimer` stores when
+it ends, a timer task posts back to the actor, and at the end the current cast is paused (not
+stopped: the position stays). A newer timer, or `minutes: null`, replaces it.
+
+**Player keys** (`keys.rs`): one table for every screen. `PlayerKey` names a key (`play-pause`,
+`seek-back` 5 s, `step-back` 1 s, `jump-back` 10 s and their `-forward`s, `volume-up`/`-down` ±5,
+`mute`, `slower`/`faster` through `SPEEDS`, `back`), and `Renderer::key_action` turns it into a
+`ScreenAction` for what is shown now (nothing when it can't apply: a seek on live media, the
+slowest speed). The apps' UI builds the same actions itself, from the same numbers, because it shows
+them ahead of the view; screens that only send keys use `Handle::key`. The CLI's status screen
+does, through `castable-receiver --control stdin` (one key name per line).
 
 The transitions are pure functions, `Phase::on_sender(self, cmd) -> (Phase, Result<Vec<PlayerCommand>, UpnpError>)`
 and `Phase::on_player(self, ev) -> (Phase, Vec<PlayerCommand>)`. A refusal returns the phase
@@ -185,7 +200,10 @@ trait Player: Send {
 `castable_net::start(config)` returns a `Receiver` with a command stream, a `views` watch of
 the current view as JSON (what to show; updated only when it changes, so a phone polling its
 state costs nothing), and a `Handle` for reporting `PlayerEvent`s back (`player_event`) and for
-presses on the receiver's own screen (`screen_command`). An app such as the mobile receiver needs
+presses on the receiver's own screen (`screen_command`), and `rename(name)`: a live rename,
+no restart. The description serves the new name at once; SSDP says byebye, then alive with a new
+`CONFIGID.UPNP.ORG`, so senders list it again; the UDN stays, so it's the same device to them,
+and a cast on screen keeps playing. An app such as the mobile receiver needs
 nothing else: draw `views` with `@castable/ui`, play `commands`, report events. CI type-checks
 `castable-net` for `aarch64-linux-android` and `aarch64-apple-ios`. A desktop app, a phone app or a test fake all implement the same
 seam. The dispatch is generic (`run<P: Player>`), not `dyn`.
@@ -226,16 +244,29 @@ like `mpv.rs`.
 
 ## 6. Configuration and the CLI
 
+**One behaviour in every app** (`castable_net::profile`), so the desktop app, the phone apps and
+the CLI act alike for the people using them:
+
+| Fact | Rule |
+| --- | --- |
+| Identity | One id per install, saved as `device-id` in the app's folder (the CLI's config folder). Never derived from the name, so a rename is the same device to phones. A first run seeds it with the old name-derived id, so existing receivers keep theirs |
+| Default name | `Castable (<computer name>)` (macOS Computer Name, else host name): unique on a network with several receivers |
+| Names | `device::friendly_name`: spaces collapsed, ends trimmed, 1–64 characters (`NameError::Empty`, `TooLong`) |
+| Renaming | Live (`Handle::rename`), saved by the app: the desktop app beside its id, the CLI in `config.toml` |
+| Overrides | `--name` / `CASTABLE_NAME` apply to one run and are not saved |
+| Port | `PREFERRED_PORT` (49494), so the address people type stays the same; a free one when it's taken. `port = 0` always picks a free one |
+
 | What | Where |
 | --- | --- |
 | Settings (`name`, `player`, `port`, `log`) | `config.toml` in the config folder; flags override |
+| Install id | `device-id` in the config folder |
 | User players | `players.toml` in the config folder |
 | Config folder | `%APPDATA%\castable` on Windows, else `$XDG_CONFIG_HOME/castable` or `~/.config/castable` |
 | Overrides | `$CASTABLE_CONFIG`, `$CASTABLE_PLAYERS` |
 
 The receiver binary is the **single source of OS facts**: the CLI asks it for the player list
-(`--players --json`) and the settings path (`--print-config-path`) instead of re-implementing them
-in TypeScript.
+(`--players --json`), the settings path (`--print-config-path`) and the default name
+(`--print-default-name`) instead of re-implementing them in TypeScript.
 
 `packages/cli` (`pnpm castable`) has two screens, each a pure reducer with an Ink view:
 
@@ -244,7 +275,8 @@ in TypeScript.
 - **Live status** (`status.ts`): runs the receiver with `--log json` and folds each log line
   (`ready`, `transport`, `player command`, `player event`, `control refused`) into a status view.
   Keys: `q` stop, `l` open the log file (its path comes in the `ready` line), `r` write a report
-  next to it and open it; keys and the hint line come from one table. The "now playing" panel
+  next to it and open it, `n` rename (type, Enter saves, Esc cancels; sent as `rename NAME` on
+  `--control stdin`); keys and the hint line come from one table. The "now playing" panel
   shows the title, source (host, format, live), sender (app, IP), quality (`media info` summary),
   hardware decoder and position; recent lines are timestamped. Components follow the codebase's
   React pattern: one per file, `function` + `export default memo(...)`.
@@ -259,6 +291,7 @@ for example `RUST_LOG=castable_net=debug`.
 | Message | Fields |
 | --- | --- |
 | `ready` | `name`, `player`, `control`, `url` |
+| `renamed` / `rename refused` | `name` / `reason` (`Empty`, `TooLong`) and `detail` |
 | `control` / `control refused` | `action` (+ `code`, `error`, `category`, `upnp` when refused) |
 | `cast from` | `peer` (the phone's IP), `user_agent` (its app) |
 | `player command` | `command`, plus `gen`, `url`, `title` (decoded), `host`, `format` (hls, mp4…), `kind`, `mime`, `live`, `headers` on load, `to_s` on seek, `volume` |

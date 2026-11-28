@@ -16,7 +16,8 @@ use tokio::sync::{mpsc, oneshot};
 const MAX_BODY: usize = 256 * 1024;
 
 pub struct Ctx {
-    pub device: DeviceInfo,
+    /// The device as it is now: `Handle::rename` changes it.
+    pub device: tokio::sync::watch::Receiver<DeviceInfo>,
     pub actor: mpsc::UnboundedSender<Msg>,
 }
 
@@ -55,7 +56,7 @@ pub async fn handle(
     let path = req.uri().path().to_string();
     let method = req.method().clone();
     let resp = match route(&method, &path) {
-        Route::Description => xml(StatusCode::OK, ctx.device.description_xml()),
+        Route::Description => xml(StatusCode::OK, ctx.device.borrow().description_xml()),
         Route::Scpd(service) => xml(StatusCode::OK, service.scpd()),
         Route::Control(service) => control(service, req, &ctx, peer).await,
         Route::Subscribe(service) => subscribe(service, &req, &ctx).await,
@@ -70,7 +71,7 @@ pub async fn handle(
         elapsed_us = started.elapsed().as_micros() as u64,
         "http"
     );
-    Ok(with_server(resp, &ctx.device))
+    Ok(with_server(resp, &ctx.device.borrow()))
 }
 
 async fn control(service: Service, req: Request<Incoming>, ctx: &Ctx, peer: std::net::SocketAddr) -> Resp {

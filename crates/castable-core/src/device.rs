@@ -6,6 +6,33 @@ use crate::xml::escape;
 pub const DEVICE_TYPE: &str = "urn:schemas-upnp-org:device:MediaRenderer:1";
 pub const DESCRIPTION_PATH: &str = "/desc.xml";
 pub const SSDP_ADDR: &str = "239.255.255.250:1900";
+/// The longest receiver name, in characters (UPnP asks for a `friendlyName` under 64).
+pub const MAX_NAME_CHARS: usize = 64;
+
+/// Why a receiver name was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, thiserror::Error)]
+#[serde(rename_all = "camelCase")]
+pub enum NameError {
+    #[error("the name is empty")]
+    Empty,
+    #[error("the name is longer than {MAX_NAME_CHARS} characters")]
+    TooLong,
+}
+
+/// A name as phones will show it: control characters dropped, runs of spaces
+/// collapsed, ends trimmed; refused when nothing is left or it's too long.
+pub fn friendly_name(raw: &str) -> Result<String, NameError> {
+    let name = raw
+        .split(|c: char| c.is_whitespace() || c.is_control())
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    match name.chars().count() {
+        0 => Err(NameError::Empty),
+        n if n > MAX_NAME_CHARS => Err(NameError::TooLong),
+        _ => Ok(name),
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceInfo {
@@ -17,6 +44,9 @@ pub struct DeviceInfo {
     pub model_number: String,
     /// The `SERVER` header: `OS/version UPnP/1.0 product/version`.
     pub server: String,
+    /// `CONFIGID.UPNP.ORG`: bumped whenever the description changes (a rename),
+    /// so senders know to fetch it again.
+    pub config_id: u32,
 }
 
 impl DeviceInfo {
@@ -28,7 +58,13 @@ impl DeviceInfo {
             model_name: "Castable Receiver".into(),
             model_number: env!("CARGO_PKG_VERSION").into(),
             server: format!("Generic/1.0 UPnP/1.0 Castable/{}", env!("CARGO_PKG_VERSION")),
+            config_id: 1,
         }
+    }
+
+    /// The same device under another name, with a new description id.
+    pub fn renamed(&self, friendly_name: impl Into<String>) -> Self {
+        Self { friendly_name: friendly_name.into(), config_id: self.config_id + 1, ..self.clone() }
     }
 
     pub fn description_xml(&self) -> String {
@@ -109,8 +145,9 @@ pub fn search_responses(device: &DeviceInfo, search: &Search, location: &str) ->
         .filter(|(nt, _)| search.st == "ssdp:all" || search.st.eq_ignore_ascii_case(nt))
         .map(|(nt, usn)| {
             format!(
-                "HTTP/1.1 200 OK\r\nCACHE-CONTROL: max-age=1800\r\nEXT:\r\nLOCATION: {location}\r\nSERVER: {server}\r\nST: {nt}\r\nUSN: {usn}\r\nContent-Length: 0\r\n\r\n",
-                server = device.server
+                "HTTP/1.1 200 OK\r\nCACHE-CONTROL: max-age=1800\r\nEXT:\r\nLOCATION: {location}\r\nSERVER: {server}\r\nST: {nt}\r\nUSN: {usn}\r\nCONFIGID.UPNP.ORG: {config}\r\nContent-Length: 0\r\n\r\n",
+                server = device.server,
+                config = device.config_id
             )
         })
         .collect()
@@ -129,8 +166,9 @@ pub fn announcements(device: &DeviceInfo, kind: Announce, location: &str) -> Vec
         .into_iter()
         .map(|(nt, usn)| match kind {
             Announce::Alive => format!(
-                "NOTIFY * HTTP/1.1\r\nHOST: {SSDP_ADDR}\r\nCACHE-CONTROL: max-age=1800\r\nLOCATION: {location}\r\nNT: {nt}\r\nNTS: ssdp:alive\r\nSERVER: {server}\r\nUSN: {usn}\r\n\r\n",
-                server = device.server
+                "NOTIFY * HTTP/1.1\r\nHOST: {SSDP_ADDR}\r\nCACHE-CONTROL: max-age=1800\r\nLOCATION: {location}\r\nNT: {nt}\r\nNTS: ssdp:alive\r\nSERVER: {server}\r\nUSN: {usn}\r\nCONFIGID.UPNP.ORG: {config}\r\n\r\n",
+                server = device.server,
+                config = device.config_id
             ),
             Announce::ByeBye => {
                 format!("NOTIFY * HTTP/1.1\r\nHOST: {SSDP_ADDR}\r\nNT: {nt}\r\nNTS: ssdp:byebye\r\nUSN: {usn}\r\n\r\n")
@@ -170,5 +208,22 @@ mod tests {
         let root = crate::xml::parse(&xml).unwrap();
         assert_eq!(root.find("friendlyName").unwrap().text, "Living room <TV>");
         assert_eq!(root.find("serviceList").unwrap().children.len(), 3);
+    }
+
+    #[test]
+    fn names_are_cleaned_and_bounded() {
+        assert_eq!(friendly_name("  Living\troom \n TV "), Ok("Living room TV".into()));
+        assert_eq!(friendly_name(" \u{7}\n "), Err(NameError::Empty));
+        assert_eq!(friendly_name(&"客".repeat(MAX_NAME_CHARS)).map(|n| n.chars().count()), Ok(MAX_NAME_CHARS));
+        assert_eq!(friendly_name(&"a".repeat(MAX_NAME_CHARS + 1)), Err(NameError::TooLong));
+    }
+
+    #[test]
+    fn a_rename_keeps_the_identity_and_bumps_the_description_id() {
+        let renamed = dev().renamed("Bedroom");
+        assert_eq!((renamed.udn.as_str(), renamed.config_id), (dev().udn.as_str(), 2));
+        assert!(renamed.description_xml().contains("<friendlyName>Bedroom</friendlyName>"));
+        let alive = announcements(&renamed, Announce::Alive, "x");
+        assert!(alive.iter().all(|m| m.contains("CONFIGID.UPNP.ORG: 2\r\n")));
     }
 }

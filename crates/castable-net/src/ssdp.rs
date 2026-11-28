@@ -1,5 +1,6 @@
 //! SSDP: answers M-SEARCH on 239.255.255.250:1900 and announces the device
-//! (alive on start and every 15 minutes, byebye on shutdown). The messages
+//! (alive on start and every 15 minutes, byebye on shutdown, and byebye then
+//! alive on a rename, so senders drop the old name). The messages
 //! themselves come from `castable_core::device`.
 
 use castable_core::device::{announcements, parse_search, search_responses, Announce, DESCRIPTION_PATH};
@@ -45,7 +46,22 @@ fn jitter(max: Duration) -> Duration {
     Duration::from_millis(r % max.as_millis().max(1) as u64)
 }
 
-pub async fn run(device: DeviceInfo, http_port: u16, port: u16, mut shutdown: watch::Receiver<bool>) {
+/// Sends one kind of announcement for `device`, twice: UDP is lossy.
+async fn announce(socket: &UdpSocket, device: &DeviceInfo, kind: Announce, location: &str, port: u16) {
+    for _ in 0..2 {
+        for msg in announcements(device, kind, location) {
+            let _ = socket.send_to(msg.as_bytes(), (MULTICAST, port)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+pub async fn run(
+    mut devices: watch::Receiver<DeviceInfo>,
+    http_port: u16,
+    port: u16,
+    mut shutdown: watch::Receiver<bool>,
+) {
     let socket = match bind(port) {
         Ok(s) => Arc::new(s),
         Err(e) => {
@@ -53,22 +69,10 @@ pub async fn run(device: DeviceInfo, http_port: u16, port: u16, mut shutdown: wa
             return;
         }
     };
-    let device = Arc::new(device);
+    let mut device = devices.borrow_and_update().clone();
     let default_location = || location(local_ip_for(MULTICAST.into()).unwrap_or(Ipv4Addr::LOCALHOST.into()), http_port);
-    let announce = |kind| {
-        let (socket, device, loc) = (socket.clone(), device.clone(), default_location());
-        async move {
-            // UDP is lossy: send each announcement twice.
-            for _ in 0..2 {
-                for msg in announcements(&device, kind, &loc) {
-                    let _ = socket.send_to(msg.as_bytes(), (MULTICAST, port)).await;
-                }
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
-        }
-    };
     tracing::info!(location = %default_location(), port, "ssdp up");
-    announce(Announce::Alive).await;
+    announce(&socket, &device, Announce::Alive, &default_location(), port).await;
     let mut ticker = tokio::time::interval(ANNOUNCE_EVERY);
     ticker.tick().await;
     let mut buf = vec![0u8; 2048];
@@ -90,9 +94,16 @@ pub async fn run(device: DeviceInfo, http_port: u16, port: u16, mut shutdown: wa
                     }
                 });
             }
-            _ = ticker.tick() => announce(Announce::Alive).await,
+            _ = ticker.tick() => announce(&socket, &device, Announce::Alive, &default_location(), port).await,
+            Ok(()) = devices.changed() => {
+                let renamed = devices.borrow_and_update().clone();
+                tracing::info!(name = %renamed.friendly_name, config_id = renamed.config_id, "renamed; announcing again");
+                announce(&socket, &device, Announce::ByeBye, &default_location(), port).await;
+                device = renamed;
+                announce(&socket, &device, Announce::Alive, &default_location(), port).await;
+            }
             _ = shutdown.changed() => {
-                announce(Announce::ByeBye).await;
+                announce(&socket, &device, Announce::ByeBye, &default_location(), port).await;
                 tracing::info!("ssdp down");
                 return;
             }

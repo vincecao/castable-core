@@ -54,7 +54,8 @@ pub struct MediaInfo {
     /// The whole stream's bitrate (an HLS variant's, say), when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bitrate_bps: Option<u64>,
-    /// The hardware decoder in use ("videotoolbox", "d3d11va"), if any.
+    /// The decoder in use: a hardware one ("videotoolbox", "d3d11va", "mediacodec")
+    /// or "software".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decoder: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

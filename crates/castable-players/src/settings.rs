@@ -4,7 +4,7 @@
 //! ```toml
 //! name = "Living room"
 //! player = "mpv"      # a name from players.toml, a command line, or "log"
-//! port = 49152        # 0 picks a free port
+//! port = 49494        # unset: 49494, or a free one if taken; 0: always a free one
 //! log = "pretty"      # or "json"
 //! font = "PingFang SC"  # on-screen text in players; "" leaves the player's own
 //! ```
@@ -25,7 +25,8 @@ pub enum LogFormat {
 pub struct Settings {
     pub name: Option<String>,
     pub player: Option<String>,
-    pub port: u16,
+    /// `None`: `castable_net::PREFERRED_PORT`, falling back to a free one.
+    pub port: Option<u16>,
     pub log: LogFormat,
     /// The font players use for on-screen text and subtitles (`{font}` in
     /// players.toml). Unset: one per OS that covers Chinese, Japanese and
@@ -34,6 +35,22 @@ pub struct Settings {
 }
 
 impl Settings {
+    /// Saves `name` into the settings file at `path`, keeping its other keys.
+    /// A rename on the status screen lands here, like the setup wizard's.
+    pub fn save_name(path: &std::path::Path, name: &str) -> Result<(), String> {
+        let mut table: toml::Table = match std::fs::read_to_string(path) {
+            Ok(text) => toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => toml::Table::new(),
+            Err(e) => return Err(format!("{}: {e}", path.display())),
+        };
+        table.insert("name".into(), toml::Value::String(name.to_owned()));
+        let text = toml::to_string(&table).map_err(|e| e.to_string())?;
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
+        std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))
+    }
+
     /// Reads `path`; a missing file is the defaults.
     pub fn load(path: &std::path::Path) -> Result<Settings, String> {
         match std::fs::read_to_string(path) {
@@ -92,7 +109,7 @@ mod tests {
         let s: Settings =
             toml::from_str("name = \"Living room\"\nplayer = \"mpv\"\nport = 49152\nlog = \"json\"\n").unwrap();
         assert_eq!(s.name.as_deref(), Some("Living room"));
-        assert_eq!((s.port, s.log), (49152, LogFormat::Json));
+        assert_eq!((s.port, s.log), (Some(49152), LogFormat::Json));
         assert_eq!(toml::from_str::<Settings>("").unwrap(), Settings::default());
         assert!(toml::from_str::<Settings>("colour = \"red\"").is_err(), "typos are reported");
     }

@@ -18,11 +18,13 @@ mod actor;
 mod gena;
 mod http;
 pub mod player;
+pub mod profile;
 mod ssdp;
 
+pub use castable_core::device::{NameError, MAX_NAME_CHARS};
 pub use castable_core::{
-    AudioInfo, CastError, DeviceInfo, ErrorCategory, ErrorCode, Gen, MediaDescriptor, MediaInfo, PlayerCommand,
-    PlayerEvent, ScreenCommand, SenderCommand, VideoInfo,
+    AudioInfo, CastError, DeviceInfo, ErrorCategory, ErrorCode, Gen, MediaDescriptor, MediaInfo, MediaTrack,
+    PlayerCommand, PlayerEvent, PlayerKey, ScreenAction, ScreenCommand, SenderCommand, TrackKind, VideoInfo,
 };
 pub use player::{run, Control, Player};
 
@@ -41,13 +43,19 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, watch};
 
+/// The HTTP port a receiver asks for first, so its address stays the same
+/// between runs (people type it into senders that can add a receiver by hand).
+pub const PREFERRED_PORT: u16 = 49494;
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub name: String,
-    /// Stable device id. `None` derives one from the name, so the same name
-    /// on the same machine keeps the same identity in senders' lists.
+    /// The install's id (`profile::device_id`), which phones know it by. `None`
+    /// derives one from the name (`profile::legacy_id`): fine for tests, but a
+    /// rename then looks like a new device after a restart.
     pub uuid: Option<String>,
-    /// Where the HTTP server listens. Port 0 picks a free port.
+    /// Where the HTTP server listens. Port 0 picks a free port; any other port
+    /// falls back to a free one when it's taken.
     pub http: SocketAddr,
     /// SSDP port; `None` turns discovery off (tests, or IP-only use).
     pub ssdp_port: Option<u16>,
@@ -58,7 +66,7 @@ impl Config {
         Self {
             name: name.into(),
             uuid: None,
-            http: SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0)),
+            http: SocketAddr::from((Ipv4Addr::UNSPECIFIED, PREFERRED_PORT)),
             ssdp_port: Some(ssdp::PORT),
         }
     }
@@ -81,6 +89,7 @@ pub struct Receiver {
 pub struct Handle {
     actor: mpsc::UnboundedSender<actor::Msg>,
     shutdown: Arc<watch::Sender<bool>>,
+    device: Arc<watch::Sender<DeviceInfo>>,
 }
 
 impl Handle {
@@ -93,6 +102,33 @@ impl Handle {
         let _ = self.actor.send(actor::Msg::Screen(press));
     }
 
+    /// A player key (`castable_core::keys`), acted on with what's shown now:
+    /// for screens that send keys rather than build presses (the CLI).
+    pub fn key(&self, key: PlayerKey) {
+        let _ = self.actor.send(actor::Msg::Key(key));
+    }
+
+    /// Renames the receiver while it runs: the description serves the new name
+    /// and SSDP says byebye, then alive with a new description id, so senders
+    /// list it again under the new name. Its identity (UDN) stays; a cast on
+    /// screen keeps playing. Returns the name as senders will show it.
+    pub fn rename(&self, name: &str) -> Result<String, NameError> {
+        let name = castable_core::device::friendly_name(name)?;
+        self.device.send_if_modified(|device| {
+            let changed = device.friendly_name != name;
+            if changed {
+                *device = device.renamed(name.clone());
+            }
+            changed
+        });
+        Ok(name)
+    }
+
+    /// The receiver as senders see it now (its name changes with `rename`).
+    pub fn device(&self) -> DeviceInfo {
+        self.device.borrow().clone()
+    }
+
     /// Stops the servers and sends SSDP byebye. Waits briefly for the byebye.
     pub async fn shutdown(&self) {
         let _ = self.shutdown.send(true);
@@ -101,25 +137,37 @@ impl Handle {
 }
 
 pub async fn start(config: Config) -> std::io::Result<Receiver> {
-    let uuid = config.uuid.clone().unwrap_or_else(|| {
-        let host = std::env::var("HOSTNAME").or_else(|_| std::env::var("COMPUTERNAME")).unwrap_or_default();
-        uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, format!("{host}/{}", config.name).as_bytes()).to_string()
-    });
-    let device = DeviceInfo::new(&config.name, uuid);
+    let uuid = config.uuid.clone().unwrap_or_else(|| profile::legacy_id(&config.name));
+    let name = castable_core::device::friendly_name(&config.name)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    let device = DeviceInfo::new(name, uuid);
+    let (device_tx, device_rx) = watch::channel(device.clone());
     let (cmd_tx, commands) = mpsc::unbounded_channel();
     let (views_tx, views) = watch::channel(Arc::from(""));
     let actor = actor::Actor::spawn(cmd_tx, views_tx);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
-    let listener = TcpListener::bind(config.http).await?;
+    let listener = match TcpListener::bind(config.http).await {
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && config.http.port() != 0 => {
+            tracing::warn!(port = config.http.port(), "HTTP port taken; using a free one");
+            TcpListener::bind(SocketAddr::new(config.http.ip(), 0)).await?
+        }
+        bound => bound?,
+    };
     let http_addr = listener.local_addr()?;
-    let ctx = Arc::new(http::Ctx { device: device.clone(), actor: actor.clone() });
+    let ctx = Arc::new(http::Ctx { device: device_rx.clone(), actor: actor.clone() });
     tokio::spawn(serve(listener, ctx, shutdown_rx.clone()));
     if let Some(port) = config.ssdp_port {
-        tokio::spawn(ssdp::run(device.clone(), http_addr.port(), port, shutdown_rx));
+        tokio::spawn(ssdp::run(device_rx, http_addr.port(), port, shutdown_rx));
     }
     tracing::info!(name = %device.friendly_name, udn = %device.udn, %http_addr, "receiver started");
-    Ok(Receiver { commands, views, handle: Handle { actor, shutdown: Arc::new(shutdown_tx) }, http_addr, device })
+    Ok(Receiver {
+        commands,
+        views,
+        handle: Handle { actor, shutdown: Arc::new(shutdown_tx), device: Arc::new(device_tx) },
+        http_addr,
+        device,
+    })
 }
 
 async fn serve(listener: TcpListener, ctx: Arc<http::Ctx>, mut shutdown: watch::Receiver<bool>) {

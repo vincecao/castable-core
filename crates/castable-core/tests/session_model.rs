@@ -39,7 +39,11 @@ impl FakePlayer {
                 self.loading = None;
             }
             PlayerCommand::Seek { .. } => assert!(self.shown.is_some(), "Seek sent with nothing loaded"),
-            PlayerCommand::SetVolume { .. } | PlayerCommand::SetMuted { .. } => {}
+            // Not part of the transport model.
+            PlayerCommand::SetVolume { .. }
+            | PlayerCommand::SetMuted { .. }
+            | PlayerCommand::SetRate { .. }
+            | PlayerCommand::SelectTrack { .. } => {}
         }
     }
 
@@ -85,7 +89,7 @@ impl World {
         }
         // A screen press counts as the user's intent only if it reaches its cast.
         let intent = match &input {
-            Input::Screen(p) if Some(p.gen) == self.current_gen() => Some(Input::Sender(p.command.clone())),
+            Input::Screen(p) if Some(p.gen) == self.current_gen() => p.command.as_sender().map(Input::Sender),
             Input::Screen(_) => None,
             other => Some(other.clone()),
         };
@@ -172,8 +176,8 @@ impl World {
             v.push(Input::Player(PlayerEvent::Closed { gen }));
             // Presses on the receiver's screen, made while it showed `gen`
             // (stale ones are made on a cast that has since been replaced).
-            v.push(Input::Screen(ScreenCommand { gen, command: SenderCommand::Play }));
-            v.push(Input::Screen(ScreenCommand { gen, command: SenderCommand::Pause }));
+            v.push(Input::Screen(ScreenCommand { gen, command: ScreenAction::Play }));
+            v.push(Input::Screen(ScreenCommand { gen, command: ScreenAction::Pause }));
         }
         v
     }
@@ -307,13 +311,13 @@ fn a_screen_press_on_a_replaced_cast_is_dropped() {
     let mut w =
         replay(vec![cast("https://media.example.com/1.mp4"), loaded(1), cast("https://media.example.com/2.mp4")]);
     let before = w.session.phase().clone();
-    let stale = ScreenCommand { gen: Gen(1), command: SenderCommand::Seek { to: Duration::from_secs(40) } };
+    let stale = ScreenCommand { gen: Gen(1), command: ScreenAction::Seek { to: Duration::from_secs(40) } };
     let out = w.session.handle(Input::Screen(stale)).unwrap();
     assert_eq!(out, Outcome::default());
     assert_eq!(w.session.phase(), &before);
     // The same press on the cast shown goes through.
     w.send(loaded(2)).unwrap();
-    let fresh = ScreenCommand { gen: Gen(2), command: SenderCommand::Seek { to: Duration::from_secs(40) } };
+    let fresh = ScreenCommand { gen: Gen(2), command: ScreenAction::Seek { to: Duration::from_secs(40) } };
     assert_eq!(
         w.session.handle(Input::Screen(fresh)).unwrap().commands,
         vec![PlayerCommand::Seek { to: Duration::from_secs(40) }]
@@ -374,4 +378,57 @@ fn every_input_sequence_keeps_the_four_rules() {
     }
     eprintln!("explored {explored} steps, {} distinct states", seen.len());
     assert!(seen.len() > 20, "the search should reach many states");
+}
+
+fn press(gen: u64, command: ScreenAction) -> Input {
+    Input::Screen(ScreenCommand { gen: Gen(gen), command })
+}
+
+#[test]
+fn the_back_button_returns_to_waiting_and_stops_the_player() {
+    let mut w = replay(vec![cast("https://media.example.com/1.mp4"), loaded(1)]);
+    let out = w.session.handle(press(1, ScreenAction::Close)).unwrap();
+    assert_eq!(out.commands, vec![PlayerCommand::Stop]);
+    assert!(out.changed, "phones see the media go away");
+    assert_eq!(w.session.phase(), &Phase::Idle);
+    // Nothing to stop the second time.
+    assert!(w.session.handle(press(1, ScreenAction::Close)).unwrap().commands.is_empty());
+}
+
+#[test]
+fn speed_and_tracks_are_set_on_loaded_media() {
+    let mut w = replay(vec![cast("https://media.example.com/1.mp4"), loaded(1)]);
+    let out = w.session.handle(press(1, ScreenAction::SetRate { rate: 1.5 })).unwrap();
+    assert_eq!(out.commands, vec![PlayerCommand::SetRate { rate: 1.5 }]);
+    assert_eq!(w.session.cast().unwrap().rate, 1.5);
+    assert_eq!(w.session.handle(press(1, ScreenAction::SetRate { rate: 9.0 })), Err(UpnpError::InvalidArgs));
+
+    let track = |id: &str, selected| MediaTrack {
+        id: id.into(),
+        kind: TrackKind::Audio,
+        label: None,
+        lang: None,
+        codec: None,
+        width: None,
+        height: None,
+        bitrate_bps: None,
+        channels: None,
+        selected,
+    };
+    w.session
+        .handle(Input::Player(PlayerEvent::Tracks { gen: Gen(1), tracks: vec![track("1", true), track("2", false)] }))
+        .unwrap();
+    let pick = ScreenAction::SelectTrack { kind: TrackKind::Audio, id: Some("2".into()) };
+    let out = w.session.handle(press(1, pick)).unwrap();
+    assert_eq!(out.commands, vec![PlayerCommand::SelectTrack { kind: TrackKind::Audio, id: Some("2".into()) }]);
+    let selected: Vec<_> = w.session.cast().unwrap().tracks.iter().map(|t| t.selected).collect();
+    assert_eq!(selected, [false, true]);
+}
+
+#[test]
+fn a_new_cast_plays_at_normal_speed() {
+    let mut w = replay(vec![cast("https://media.example.com/1.mp4"), loaded(1)]);
+    w.session.handle(press(1, ScreenAction::SetRate { rate: 2.0 })).unwrap();
+    w.session.handle(cast("https://media.example.com/2.mp4")).unwrap();
+    assert_eq!(w.session.cast().unwrap().rate, 1.0);
 }
