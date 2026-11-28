@@ -117,7 +117,7 @@ Inputs come from two sides and produce **`PlayerCommand`s** for whoever plays th
 | --- | --- | --- |
 | Sender commands | `SenderCommand` (`SetUri`, `Play`, `Pause`, `Stop`, `Seek`) | A phone, via SOAP. Volume and mute skip the session: the renderer turns them straight into `SetVolume` / `SetMuted` |
 | Screen presses | `ScreenCommand { gen, command: ScreenAction }` | The receiver's own screen, remote or keyboard. `gen` is the cast the screen showed; a press on a replaced cast is dropped. `ScreenAction` is what a phone can ask (`Play`, `Pause`, `Stop`, `Seek`, handled exactly as a phone's) plus the screen's own: `Close` (the back button: back to `Idle`, stopping the player), `SetRate` (within `RATES`, 0.25–4), `SelectTrack { kind, id }`, and three that aren't the cast's: `SetVolume` / `SetMuted` (the renderer's mixer, as a phone's RenderingControl) and `SetSleepTimer { minutes }` (the receiver's clock, below) |
-| Player events | `PlayerEvent` (`Loaded`, `LoadFailed`, `Progress`, `Ended`, `Closed`, `Info`, `Tracks`) — each tagged with a `Gen` | The player. `Closed`: it went away (process exited, window closed), so nothing is loaded. `Info`: what it found out about the media (`MediaInfo`: resolution, codecs, fps, bitrates, HDR, audio format, container, decoder: a hardware one or `software`); merged into the cast and shown in the loaded view. `Tracks`: the audio, video and subtitle tracks (`MediaTrack`, ids are the player's own), selected ones marked |
+| Player events | `PlayerEvent` (`Loaded`, `LoadFailed`, `Progress`, `Ended`, `Closed`, `Info`, `Tracks`) — each tagged with a `Gen` | The player. `Closed`: it went away (process exited, window closed), so nothing is loaded. `Info`: what it found out about the media (`MediaInfo`: resolution, codecs, fps, bitrates, HDR, audio format, container, decoder: a hardware one or `software`); merged into the cast and shown in the loaded view; its badge (`qualityLabel`) names standard frames ("1080p", a 1920×800 crop too, "4K · HDR10") and gives any other size as is ("2592×1080"), never a class it may not have. `Tracks`: the audio, video and subtitle tracks (`MediaTrack`, ids are the player's own), selected ones marked |
 | Output | `PlayerCommand` (`Load{gen,media}`, `Play`, `Pause`, `Stop`, `Seek`, `SetVolume`, `SetMuted`, `SetRate`, `SelectTrack`) | → the player |
 
 A cast carries its speed (`rate`, 1 on every new cast) and its `tracks`; a `SelectTrack` marks the
@@ -254,7 +254,7 @@ the CLI act alike for the people using them:
 | Names | `device::friendly_name`: spaces collapsed, ends trimmed, 1–64 characters (`NameError::Empty`, `TooLong`) |
 | Renaming | Live (`Handle::rename`), saved by the app: the desktop app beside its id, the CLI in `config.toml` |
 | Overrides | `--name` / `CASTABLE_NAME` apply to one run and are not saved |
-| Port | `PREFERRED_PORT` (49494), so the address people type stays the same; a free one when it's taken. `port = 0` always picks a free one |
+| Port | `PREFERRED_PORT` (49494), so the address people type stays the same; a free one when it's taken. `port = 0` always picks a free one. The wizard offers 49494 first; a saved custom port opens typed in |
 
 | What | Where |
 | --- | --- |
@@ -290,7 +290,7 @@ for example `RUST_LOG=castable_net=debug`.
 
 | Message | Fields |
 | --- | --- |
-| `ready` | `name`, `player`, `control`, `url` |
+| `ready` | `name`, `player`, `control` (`full`, `launch`, or `none`: no player, log only, as `--players --json`), `url` |
 | `renamed` / `rename refused` | `name` / `reason` (`Empty`, `TooLong`) and `detail` |
 | `control` / `control refused` | `action` (+ `code`, `error`, `category`, `upnp` when refused) |
 | `cast from` | `peer` (the phone's IP), `user_agent` (its app) |

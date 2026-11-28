@@ -1,4 +1,5 @@
 // The live status screen: a Status, drawn.
+import { controlText } from "../control.ts";
 import { Text } from "ink";
 import { memo } from "react";
 import type { Status } from "../status.ts";
@@ -19,7 +20,7 @@ function Dashboard({ status, hint }: { status: Status; hint: string }) {
   return (
     <Frame title={`“${ready.name}” is ready · phones on the same Wi-Fi can cast now`} hint={hint}>
       <Text dimColor>
-        player {ready.player} ({ready.control}) · {ready.url}
+        {ready.control === "none" ? "no player, log only" : `player ${ready.player} (${controlText(ready.control)})`} · {ready.url}
       </Text>
       <Text> </Text>
       <NowPlaying state={status.state} now={status.now} quality={status.quality} position={status.position} />

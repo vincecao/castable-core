@@ -34,7 +34,7 @@ test("installed, fully controllable players come first; other OSes are hidden", 
 test("the happy path: keep the name, take mpv, automatic port, save and start", () => {
   const s = press(initial(players, {}, "Castable (mac)"), enter, enter, enter, enter);
   assert.deepEqual(s.step, { kind: "done", start: true });
-  assert.deepEqual(s.draft, { name: "Castable (mac)", player: "mpv", port: 0, log: "pretty" });
+  assert.deepEqual(s.draft, { name: "Castable (mac)", player: "mpv", port: 49494, log: "pretty" });
 });
 
 test("typing a name, a custom port, and going back", () => {

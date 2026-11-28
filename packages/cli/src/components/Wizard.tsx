@@ -1,4 +1,5 @@
 // The setup wizard's screens: one per step, picked by the step's kind.
+import { controlText } from "../control.ts";
 import { Box, Text } from "ink";
 import { memo } from "react";
 import { MOVE_HINT } from "../theme.ts";
@@ -9,7 +10,7 @@ import List from "./List.tsx";
 import Problem from "./Problem.tsx";
 
 const playerNote = (c: State["choices"][number]) =>
-  `${c.name === "log" ? "no player" : !c.installed ? "not installed" : c.control === "full" ? "full control" : "starts only"} · ${c.description}`;
+  `${c.name === "log" ? "no player" : !c.installed ? "not installed" : controlText(c.control)} · ${c.description}`;
 
 function Wizard({ state, settingsPath }: { state: State; settingsPath: string }) {
   const { step, draft, choices, error } = state;

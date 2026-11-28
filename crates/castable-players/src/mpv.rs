@@ -363,7 +363,7 @@ mod tests {
             assert!(t.observe(&p(name, data)));
         }
         let i = t.take_notable().unwrap();
-        assert_eq!((i.resolution_label(), i.container.as_deref()), (Some("1080p"), Some("hls")));
+        assert_eq!((i.resolution_label().as_deref(), i.container.as_deref()), (Some("1080p"), Some("hls")));
         assert_eq!(t.take_notable(), None, "nothing new");
         t.observe(&p("hls-bitrate", json!(5_300_000.0)));
         assert_eq!(t.take_notable(), None, "a wobble isn't reported");

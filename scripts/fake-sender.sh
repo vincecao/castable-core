@@ -5,9 +5,9 @@
 #   scripts/fake-sender.sh play | pause | stop | status
 #   scripts/fake-sender.sh seek 0:01:30
 #
-# RECEIVER defaults to http://localhost:49152 (the example's --port 49152).
+# RECEIVER defaults to http://localhost:49494 (Castable's own port).
 set -eu
-RECEIVER="${RECEIVER:-http://localhost:49152}"
+RECEIVER="${RECEIVER:-http://localhost:49494}"
 
 soap() {
   curl -sS "$RECEIVER/ctl/avt" -H 'Content-Type: text/xml; charset="utf-8"' \

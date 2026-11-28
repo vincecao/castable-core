@@ -258,7 +258,7 @@ fn log_info(gen: u64, i: &castable_core::MediaInfo) {
     tracing::info!(
         event = "info",
         gen,
-        resolution = i.resolution_label().unwrap_or(""),
+        resolution = i.resolution_label().unwrap_or_default(),
         width = v.width,
         height = v.height,
         video_codec = v.codec.as_deref().unwrap_or(""),

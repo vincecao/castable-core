@@ -23,10 +23,11 @@ The script installs what's missing (Rust, Node 22, pnpm; a player if you want on
 receiver, and opens the setup wizard. The wizard is keyboard only: ↑↓ to move, Enter to choose,
 Esc to go back. It asks for:
 
-1. the name phones will show (for example "Living room")
+1. the name phones will show (for example "Living room"; it suggests "Castable (your computer's name)")
 2. the player: installed players first, with full control (mpv, IINA, VLC) before start-only ones
    (QuickTime, ffplay, MPC-HC, PotPlayer, the browser)
-3. the network port: automatic, 49152, or one you type
+3. the network port: 49494 (Castable's own, so the address stays the same), a free one each time,
+   or one you type
 
 Then it starts the receiver with a live status screen. Open a cast app on a phone on the same Wi-Fi
 (mconnect or TV Assist on iPhone, BubbleUPnP on Android, or any video app with a DLNA/"TV" button)
@@ -38,16 +39,48 @@ and pick the name you chose.
 pnpm castable            # start (or set up, the first time)
 pnpm castable setup      # change name, player or port
 pnpm castable start      # live status: what's playing, from which phone, resolution, codecs, bitrate,
-                         # position; q stop · l open the log · r write a report
+                         # position; q stop · n rename · l open the log · r write a report
                          # player keys: space play/pause · ←→ 5 s (shift 1 s) · J / L 10 s
                          # ↑↓ volume · m mute · < > speed · esc back to waiting
 pnpm castable players    # which players this computer has
 ```
 
+### What you'll see
+
+`pnpm castable start` shows a live status screen. Here a video is playing and the receiver has just
+been renamed with `n` (type, Enter): phones see the new name at once, the video keeps playing, and
+the name is saved. Captured from a real run with `scripts/fake-sender.sh` as the phone, so the
+sender shows as curl; a phone shows its app. With a full-control player, `quality` fills in with
+the resolution, codecs and bitrate.
+
+```text
+ ◉ Castable
+
+ “Den TV” is ready · phones on the same Wi-Fi can cast now
+
+ no player, log only · http://192.0.2.2:49494/desc.xml
+
+ ● Playing sample
+
+ source    192.0.2.2:8000 · MP4 · on demand
+ from      curl 8.5.0 · 127.0.0.1
+ quality   waiting for the player…
+
+ 00:59:32 cast: sample
+ 00:59:32 NO_MEDIA_PRESENT → TRANSITIONING
+ 00:59:32 TRANSITIONING → STOPPED
+ 00:59:32 play
+ 00:59:32 STOPPED → PLAYING
+ 00:59:37 renamed: “Den TV”
+
+ space play/pause · ←→ 5 s (shift 1 s) · ↑↓ volume · m mute · < > speed · esc back
+ q stop and quit · n rename · l open the log · r write a report
+```
+
 The receiver also runs on its own, with flags that override the settings file:
 
 ```sh
-target/release/castable-receiver --name "My Mac" --player mpv --port 49152
+target/release/castable-receiver --name "My Mac" --player mpv --port 49494
 target/release/castable-receiver --player 'open -a "QuickTime Player" {url}'   # any command
 target/release/castable-receiver --players
 ```
@@ -149,7 +182,7 @@ scripts/fake-sender.sh status        # CurrentTransportState: PLAYING
 scripts/fake-sender.sh seek 0:01:30
 ```
 
-`RECEIVER=http://host:port` points it at a receiver elsewhere (default `http://localhost:49152`).
+`RECEIVER=http://host:port` points it at a receiver elsewhere (default `http://localhost:49494`).
 Tests and examples use only made-up sources: `media.example.com` and `192.0.2.x` addresses
 (reserved for examples), the generated sample above, and English titles.
 

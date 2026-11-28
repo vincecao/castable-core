@@ -54,7 +54,22 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           cd "$RUNNER_TEMP"
-          script -qec "stty cols 100 rows 30; timeout 8 node $GITHUB_WORKSPACE/packages/cli/bin/castable.mjs setup" /dev/null > wizard.out || true
+          # Wait for the first screen rather than a fixed time (-f flushes as it's
+          # written). A run sometimes prints nothing at all; then try once more and
+          # show what was running, so the next one tells us why.
+          attempt() {
+            script -qfec "stty cols 100 rows 30; timeout 60 node $GITHUB_WORKSPACE/packages/cli/bin/castable.mjs setup" /dev/null > wizard.out &
+            local wizard=$!
+            for _ in $(seq 120); do
+              grep -qE "Error|phones call|Building the receiver" wizard.out && break
+              sleep 0.5
+            done
+            [ -s wizard.out ] || ps -eo pid,etime,stat,args | grep -E "node|cargo|script|rustc" | grep -v grep
+            kill "$wizard" 2>/dev/null || true
+            pkill -f "cargo build --release" || true
+          }
+          attempt
+          if [ ! -s wizard.out ]; then echo "The wizard printed nothing; trying once more."; attempt; fi
           # Any wizard screen counts (here it starts by building the receiver);
           # a crash such as "React is not defined" doesn't.
           if grep -q "Error" wizard.out || ! grep -qE "phones call|Building the receiver" wizard.out; then
