@@ -58,7 +58,7 @@ the resolution, codecs and bitrate.
 
  “Den TV” is ready · phones on the same Wi-Fi can cast now
 
- player log (none (log only)) · http://192.0.2.2:49494/desc.xml
+ no player, log only · http://192.0.2.2:49494/desc.xml
 
  ● Playing sample
 
@@ -66,12 +66,12 @@ the resolution, codecs and bitrate.
  from      curl 8.5.0 · 127.0.0.1
  quality   waiting for the player…
 
- 00:44:48 cast: sample
- 00:44:48 NO_MEDIA_PRESENT → TRANSITIONING
- 00:44:48 TRANSITIONING → STOPPED
- 00:44:48 play
- 00:44:48 STOPPED → PLAYING
- 00:44:53 renamed: “Den TV”
+ 00:59:32 cast: sample
+ 00:59:32 NO_MEDIA_PRESENT → TRANSITIONING
+ 00:59:32 TRANSITIONING → STOPPED
+ 00:59:32 play
+ 00:59:32 STOPPED → PLAYING
+ 00:59:37 renamed: “Den TV”
 
  space play/pause · ←→ 5 s (shift 1 s) · ↑↓ volume · m mute · < > speed · esc back
  q stop and quit · n rename · l open the log · r write a report

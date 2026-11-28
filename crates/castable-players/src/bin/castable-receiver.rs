@@ -191,7 +191,7 @@ fn pick(
     font: Option<String>,
 ) -> Result<(Backend, &'static str), CastError> {
     let Some(choice) = choice.filter(|c| !matches!(*c, "log" | "none" | "")) else {
-        return Ok((Backend::Log(handle), "none (log only)"));
+        return Ok((Backend::Log(handle), "none"));
     };
     let (name, spec) = match registry.get(choice) {
         Some(spec) => (choice, spec.clone()),
@@ -202,7 +202,8 @@ fn pick(
             return Err(CastError::with_detail(ErrorCode::PlayerUnknown, format!("{choice}; see --players")));
         }
     };
-    let control = if spec.control == Control::Launch { "launch only" } else { "full" };
+    // As `--players --json` says it: "full", "launch", or "none" (no player, log only).
+    let control = if spec.control == Control::Launch { "launch" } else { "full" };
     Ok((Backend::External(Box::new(External::new(name, spec, handle)?.with_font(font))), control))
 }
 

@@ -290,7 +290,7 @@ for example `RUST_LOG=castable_net=debug`.
 
 | Message | Fields |
 | --- | --- |
-| `ready` | `name`, `player`, `control`, `url` |
+| `ready` | `name`, `player`, `control` (`full`, `launch`, or `none`: no player, log only, as `--players --json`), `url` |
 | `renamed` / `rename refused` | `name` / `reason` (`Empty`, `TooLong`) and `detail` |
 | `control` / `control refused` | `action` (+ `code`, `error`, `category`, `upnp` when refused) |
 | `cast from` | `peer` (the phone's IP), `user_agent` (its app) |

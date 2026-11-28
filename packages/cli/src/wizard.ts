@@ -2,11 +2,12 @@
 // reducer. No I/O and no rendering here, so every key path is unit-tested.
 
 import { PREFERRED_PORT } from "@castable/protocol";
+import type { Control } from "./control.ts";
 
 export interface PlayerInfo {
   name: string;
   description: string;
-  control: "full" | "launch";
+  control: Exclude<Control, "none">;
   availableHere: boolean;
   installed: boolean;
 }
