@@ -68,6 +68,9 @@ impl Config {
 pub struct Receiver {
     /// What the player must do, in order.
     pub commands: mpsc::UnboundedReceiver<PlayerCommand>,
+    /// The receiver's view (`castable_core::View` as JSON: what to show), updated on every change.
+    /// An app draws its screen from this; `@castable/ui` renders it as is.
+    pub views: watch::Receiver<Arc<str>>,
     pub handle: Handle,
     pub http_addr: SocketAddr,
     pub device: DeviceInfo,
@@ -104,7 +107,8 @@ pub async fn start(config: Config) -> std::io::Result<Receiver> {
     });
     let device = DeviceInfo::new(&config.name, uuid);
     let (cmd_tx, commands) = mpsc::unbounded_channel();
-    let actor = actor::Actor::spawn(cmd_tx);
+    let (views_tx, views) = watch::channel(Arc::from(""));
+    let actor = actor::Actor::spawn(cmd_tx, views_tx);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
     let listener = TcpListener::bind(config.http).await?;
@@ -115,7 +119,7 @@ pub async fn start(config: Config) -> std::io::Result<Receiver> {
         tokio::spawn(ssdp::run(device.clone(), http_addr.port(), port, shutdown_rx));
     }
     tracing::info!(name = %device.friendly_name, udn = %device.udn, %http_addr, "receiver started");
-    Ok(Receiver { commands, handle: Handle { actor, shutdown: Arc::new(shutdown_tx) }, http_addr, device })
+    Ok(Receiver { commands, views, handle: Handle { actor, shutdown: Arc::new(shutdown_tx) }, http_addr, device })
 }
 
 async fn serve(listener: TcpListener, ctx: Arc<http::Ctx>, mut shutdown: watch::Receiver<bool>) {

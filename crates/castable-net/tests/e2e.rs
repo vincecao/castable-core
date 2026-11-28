@@ -96,7 +96,7 @@ async fn a_phone_casts_plays_and_gets_events() {
     let set = avt(
         addr,
         "SetAVTransportURI",
-        "<CurrentURI>http://10.0.0.9/e1.mp4</CurrentURI><CurrentURIMetaData></CurrentURIMetaData>",
+        "<CurrentURI>http://192.0.2.10/e1.mp4</CurrentURI><CurrentURIMetaData></CurrentURIMetaData>",
     )
     .await;
     assert_eq!(set.status, 200, "{}", set.body);
@@ -104,7 +104,7 @@ async fn a_phone_casts_plays_and_gets_events() {
     match next_command(&mut rx.commands).await {
         PlayerCommand::Load { gen, media } => {
             assert_eq!(gen, Gen(1));
-            assert_eq!(media.url, "http://10.0.0.9/e1.mp4");
+            assert_eq!(media.url, "http://192.0.2.10/e1.mp4");
             assert_eq!(media.mime.as_deref(), Some("video/mp4"));
         }
         other => panic!("expected Load, got {other:?}"),
@@ -162,5 +162,42 @@ async fn answers_m_search() {
     assert!(answer.starts_with("HTTP/1.1 200 OK"), "{answer}");
     assert!(answer.contains(&format!(":{}/desc.xml", rx.http_addr.port())), "{answer}");
     assert!(answer.contains("ST: urn:schemas-upnp-org:device:MediaRenderer:1"));
+    rx.handle.shutdown().await;
+}
+
+/// An app draws its screen from `views`; presses on that screen come back
+/// through `Handle::screen_command`.
+#[tokio::test]
+async fn the_view_follows_the_cast_and_screen_presses_work() {
+    let mut rx = castable_net::start(local_config()).await.unwrap();
+    let view = |rx: &castable_net::Receiver| serde_json::from_str::<serde_json::Value>(&rx.views.borrow()).unwrap();
+    assert_eq!(view(&rx)["phase"], "idle");
+
+    let set = avt(
+        rx.http_addr,
+        "SetAVTransportURI",
+        "<CurrentURI>https://media.example.com/sample.mp4</CurrentURI><CurrentURIMetaData></CurrentURIMetaData>",
+    )
+    .await;
+    assert_eq!(set.status, 200);
+    tokio::time::timeout(Duration::from_secs(2), rx.views.changed()).await.unwrap().unwrap();
+    let v = view(&rx);
+    assert_eq!(
+        (v["phase"].as_str(), v["title"].as_str(), v["gen"].as_u64()),
+        (Some("loading"), Some("sample"), Some(1))
+    );
+    let _load = next_command(&mut rx.commands).await;
+
+    rx.handle.player_event(PlayerEvent::Loaded { gen: Gen(1), duration: Some(Duration::from_secs(60)) });
+    // A press on the screen, made on cast 1: plays it.
+    rx.handle.screen_command(castable_net::ScreenCommand { gen: Gen(1), command: castable_net::SenderCommand::Play });
+    assert_eq!(next_command(&mut rx.commands).await, PlayerCommand::Play);
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while view(&rx)["playback"] != "playing" {
+            rx.views.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
     rx.handle.shutdown().await;
 }

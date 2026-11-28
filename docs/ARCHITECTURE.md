@@ -182,9 +182,12 @@ trait Player: Send {
 }
 ```
 
-`castable_net::start(config)` returns a `Receiver` with a command stream and a `Handle` for
-reporting `PlayerEvent`s back (`player_event`) and for presses on the receiver's own screen
-(`screen_command`). A desktop app, a phone app or a test fake all implement the same
+`castable_net::start(config)` returns a `Receiver` with a command stream, a `views` watch of
+the current view as JSON (what to show; updated only when it changes, so a phone polling its
+state costs nothing), and a `Handle` for reporting `PlayerEvent`s back (`player_event`) and for
+presses on the receiver's own screen (`screen_command`). An app such as the mobile receiver needs
+nothing else: draw `views` with `@castable/ui`, play `commands`, report events. CI type-checks
+`castable-net` for `aarch64-linux-android` and `aarch64-apple-ios`. A desktop app, a phone app or a test fake all implement the same
 seam. The dispatch is generic (`run<P: Player>`), not `dyn`.
 
 ## 5. Players

@@ -2,7 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # Feature branches too, so a branch is checked before its PR is opened.
+    branches: [main, "feat/**", "fix/**"]
   pull_request:
 
 jobs:
@@ -23,6 +24,18 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --all
+
+  mobile:
+    # The network layer runs inside the iOS and Android apps: it must build for them.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, aarch64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check -p castable-net --target aarch64-linux-android
+      - run: cargo check -p castable-net --target aarch64-apple-ios
 
   typescript:
     # The wire types must accept every fixture the Rust tests write; the CLI's reducers are tested.

@@ -68,6 +68,7 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "serde_json",
  "socket2 0.5.10",
  "tokio",
  "tracing",
